@@ -4,6 +4,7 @@ project(Relay)
 # Dependencies
 find_path(CPP_HTTPLIB_INCLUDE_DIRS "httplib.h")
 find_package(Boost REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog REQUIRED)
 
 add_executable(${PROJECT_NAME})
@@ -19,5 +20,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Boost::boost
+    nlohmann_json::nlohmann_json
     spdlog::spdlog
 )

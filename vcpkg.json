@@ -4,6 +4,7 @@
   "dependencies": [
     "boost-asio",
     "cpp-httplib",
+    "nlohmann-json",
     "spdlog"
   ]
 }
