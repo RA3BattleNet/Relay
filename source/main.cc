@@ -71,7 +71,8 @@ int main()
     {
         a::io_context context;
         auto task = a::co_spawn(context, run_control_server, a::use_future);
-        context.run();
+        auto runner_1 = std::async(std::launch::async, [&context] { context.run(); });
+        auto runner_2 = std::async(std::launch::async, [&context] { context.run(); });
     }
     catch (std::exception const& e)
     {
