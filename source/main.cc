@@ -113,7 +113,7 @@ int main()
     try
     {
         l::cfg::load_env_levels();
-        l::set_default_logger(l::rotating_logger_mt("file_logger", "logs/relay.txt", 1048576 * 5, 3));
+        l::set_default_logger(l::rotating_logger_mt("main", "logs/relay.txt", 1048576 * 5, 3));
         l::flush_every(60s);
         a::io_context context;
         l::info("starting relay server...");
@@ -234,9 +234,15 @@ void RelayServerNat::update_ip()
     h::Client client{ "https://api.ipify.org", 80 };
     if (h::Result result = client.Get("/"); result)
     {
-        auto new_ip = a::ip::address_v4::from_string(result.value().body);;
+        l::info("obtaining ip, response = {}", result.value().body);
+        auto new_ip = a::ip::address_v4::from_string(result.value().body);
+        l::info("parsed ip: {}", new_ip.to_string());
         std::scoped_lock lock{ m_mutex };
         m_public_ip = new_ip;
+    }
+    else
+    {
+        l::error("failed to obtain ip: {}", h::to_string(result.error()));
     }
 }
 
