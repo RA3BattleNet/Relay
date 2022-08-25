@@ -291,7 +291,7 @@ a::awaitable<void> Connection::run_relay
         auto connection = Connection{ std::move(sockets) };
         connection.m_last_update = t::steady_clock::now();
         connection.m_players = { players[1], players[0] };
-        l::info("{} serving for players {} and {}", &connection, players[0], players[1]);
+        l::info("{} serving for players {} and {}", connection, players[0], players[1]);
         co_await(connection.watchdog() and connection.do_relay<0>() and connection.do_relay<1>());
     }
     catch (std::exception const& e)
