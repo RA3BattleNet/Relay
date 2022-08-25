@@ -392,6 +392,7 @@ a::awaitable<void> Connection::do_relay()
         co_return;
     }
     l::info("{} stopped", name);
+    co_return;
 }
 
 template <typename FormatContext>
