@@ -1,4 +1,7 @@
 #include <boost/asio.hpp>
+#if not __has_include(<coroutine>)
+#include <experimental/coroutine>
+#endif
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
