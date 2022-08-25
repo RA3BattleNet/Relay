@@ -122,6 +122,7 @@ int main()
         auto runner_2 = std::async(std::launch::async, [&context] { context.run(); });
         runner_1.get();
         runner_2.get();
+        task.get();
     }
     catch (std::exception const& e)
     {
