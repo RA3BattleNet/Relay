@@ -124,7 +124,9 @@ int main()
     catch (std::exception const& e)
     {
         l::critical("Application is terminating because: {}", e.what());
+        return 1;
     }
+    return 0;
 }
 
 a::awaitable<void> run_control_server()
