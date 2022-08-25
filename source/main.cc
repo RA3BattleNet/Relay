@@ -114,6 +114,7 @@ int main()
     {
         l::cfg::load_env_levels();
         l::set_default_logger(l::rotating_logger_mt("file_logger", "logs/relay.txt", 1048576 * 5, 3));
+        l::flush_every(60s);
         a::io_context context;
         l::info("starting relay server...");
         auto task = a::co_spawn(context, run_control_server, a::use_future);
