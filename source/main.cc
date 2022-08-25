@@ -231,7 +231,7 @@ j::json Response::to_json() const
 
 void RelayServerNat::update_ip()
 {
-    h::Client client{ "https://api.ipify.org", 80 };
+    h::Client client{ "https://api.ipify.org" };
     if (h::Result result = client.Get("/"); result)
     {
         l::info("obtaining ip, response = {}", result.value().body);
