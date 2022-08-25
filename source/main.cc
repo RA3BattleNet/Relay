@@ -109,6 +109,9 @@ template<>
 struct fmt::formatter<Connection*> : Connection::Formatter {};
 
 template<>
+struct fmt::formatter<Connection const*> : Connection::Formatter {};
+
+template<>
 struct fmt::formatter<a::ip::udp::endpoint> : EndPointFormatter {};
 
 int main()
