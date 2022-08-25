@@ -147,6 +147,7 @@ a::awaitable<void> run_control_server()
 
 a::awaitable<void> process_control_server(a::ip::tcp::iostream connection)
 {
+    j::json response;
     try
     {
         std::string line;
@@ -154,17 +155,27 @@ a::awaitable<void> process_control_server(a::ip::tcp::iostream connection)
         l::info("Control server: processing input {}", line);
         if (line == "status")
         {
-            connection << Response{ .succeeded = true, .message = get_status().dump() }.to_json();
-            co_return;
+            response = Response{ .succeeded = true, .message = get_status().dump() }.to_json();
         }
-        connection << co_await spawn_relay_server(j::json::parse(line));
+        else
+        {
+            response = co_await spawn_relay_server(j::json::parse(line));
+        }
     }
     catch (std::exception const& e)
     {
         l::error("Error in control server: {}", e.what());
-        connection << Response{ .succeeded = false, .message = e.what() }.to_json();
+        response = Response{ .succeeded = false, .message = e.what() }.to_json();
     }
-    connection.flush();
+    try
+    {
+        connection << response;
+        connection.flush();
+    }
+    catch (std::exception const& e)
+    {
+        l::error("Error in control server when writing output: {}", e.what());;
+    }
 }
 
 j::json get_status()
