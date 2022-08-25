@@ -154,15 +154,15 @@ a::awaitable<void> process_control_server(a::ip::tcp::iostream connection)
         l::info("Control server: processing input {}", line);
         if (line == "status")
         {
-            connection << Response{ .succeeded = true, .message = get_status().dump() }.to_json() << std::endl;
+            connection << Response{ .succeeded = true, .message = get_status().dump() }.to_json();
             co_return;
         }
-        connection << co_await spawn_relay_server(j::json::parse(line)) << std::endl;
+        connection << co_await spawn_relay_server(j::json::parse(line));
     }
     catch (std::exception const& e)
     {
         l::error("Error in control server: {}", e.what());
-        connection << Response{ .succeeded = false, .message = e.what() }.to_json() << std::endl;
+        connection << Response{ .succeeded = false, .message = e.what() }.to_json();
     }
 }
 
