@@ -59,11 +59,10 @@ class Connection
 public:
     using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
     using UdpSocket = a::use_awaitable_t<>::as_default_on_t<a::ip::udp::socket>;
-    struct Formatter
+    struct Formatter : fmt::formatter<std::string>
     {
-        constexpr auto parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin());
         template <typename FormatContext>
-        auto format(Connection const* input, FormatContext& ctx) -> decltype(ctx.out());
+        auto format(Connection const& input, FormatContext& ctx) -> decltype(ctx.out());
     };
 public:
     inline static std::atomic<std::uintmax_t> s_count = 0; // 统计存活的连接数量
@@ -98,18 +97,14 @@ public:
     a::awaitable<void> do_relay();
 };
 
-struct EndPointFormatter
+struct EndPointFormatter : fmt::formatter<std::string>
 {
-    constexpr auto parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin());
     template <typename FormatContext>
     auto format(a::ip::udp::endpoint const& input, FormatContext& ctx) -> decltype(ctx.out());
 };
 
 template<>
-struct fmt::formatter<Connection*> : Connection::Formatter {};
-
-template<>
-struct fmt::formatter<Connection const*> : Connection::Formatter {};
+struct fmt::formatter<Connection> : Connection::Formatter {};
 
 template<>
 struct fmt::formatter<a::ip::udp::endpoint> : EndPointFormatter {};
@@ -309,12 +304,12 @@ Connection::Connection(std::array<UdpSocket, 2>&& sockets) :
     m_sockets{ std::move(sockets) }
 {
     ++s_count;
-    l::info("{} is being created", this);
+    l::info("{} is being created", *this);
 }
 
 Connection::~Connection()
 {
-    l::info("{} is being destroyed", this);
+    l::info("{} is being destroyed", *this);
     --s_count;
 }
 
@@ -328,7 +323,7 @@ a::awaitable<void> Connection::watchdog()
             or not s0.is_open() or not s1.is_open())
         {
             m_cancelled = true;
-            l::info("{} is being cancelled by watchdog", this);
+            l::info("{} is being cancelled by watchdog", *this);
             for (auto& socket : m_sockets)
             {
                 if (socket.is_open())
@@ -355,7 +350,7 @@ a::ip::udp::endpoint Connection::get_our_target(a::ip::udp::endpoint&& their_tar
 template<std::size_t index>
 a::awaitable<void> Connection::do_relay()
 {
-    std::string name = fmt::format("{} {}<{}>", this, std::source_location::current().function_name(), index);
+    std::string name = fmt::format("{} {}<{}>", *this, std::source_location::current().function_name(), index);
     try
     {
         auto& receiver = m_sockets[std::size_t{ 1 } - index];
@@ -397,20 +392,10 @@ a::awaitable<void> Connection::do_relay()
     l::info("{} stopped", name);
 }
 
-constexpr auto Connection::Formatter::parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin())
-{
-    return ctx.end();
-}
-
 template <typename FormatContext>
-auto Connection::Formatter::format(Connection const* input, FormatContext& ctx) -> decltype(ctx.out())
+auto Connection::Formatter::format(Connection const& input, FormatContext& ctx) -> decltype(ctx.out())
 {
-    return fmt::format_to(ctx.out(), "Connection #{}", input->m_id);
-}
-
-constexpr auto EndPointFormatter::parse(fmt::format_parse_context& ctx) -> decltype(ctx.begin())
-{
-    return ctx.end();
+    return fmt::format_to(ctx.out(), "Connection #{}", input.m_id);
 }
 
 template <typename FormatContext>
