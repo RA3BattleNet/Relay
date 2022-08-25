@@ -169,7 +169,7 @@ a::awaitable<void> process_control_server(a::ip::tcp::iostream connection)
     }
     try
     {
-        connection << response;
+        connection << response.dump();
         connection.flush();
     }
     catch (std::exception const& e)
