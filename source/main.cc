@@ -91,10 +91,8 @@ public:
     Connection(std::array<UdpSocket, 2>&& sockets);
     ~Connection();
     a::awaitable<void> watchdog();
-    template<std::size_t index>
-    a::ip::udp::endpoint get_our_target(a::ip::udp::endpoint&& their_target);
-    template<std::size_t index>
-    a::awaitable<void> do_relay();
+    a::ip::udp::endpoint get_our_target(std::size_t index, a::ip::udp::endpoint&& their_target);
+    a::awaitable<void> do_relay(std::size_t index);
 };
 
 struct EndPointFormatter : fmt::formatter<std::string>
@@ -294,7 +292,7 @@ a::awaitable<void> Connection::run_relay
         connection.m_last_update = t::steady_clock::now();
         connection.m_players = { players[1], players[0] };
         l::info("{} serving for players {} and {}", connection, players[0], players[1]);
-        co_await(connection.watchdog() and connection.do_relay<0>() and connection.do_relay<1>());
+        co_await(connection.watchdog() and connection.do_relay(0) and connection.do_relay(1));
     }
     catch (std::exception const& e)
     {
@@ -340,8 +338,7 @@ a::awaitable<void> Connection::watchdog()
     };
 }
 
-template<std::size_t index>
-a::ip::udp::endpoint Connection::get_our_target(a::ip::udp::endpoint&& their_target)
+a::ip::udp::endpoint Connection::get_our_target(std::size_t index, a::ip::udp::endpoint&& their_target)
 {
     auto now = t::steady_clock::now();
     m_last_update = now;
@@ -349,8 +346,7 @@ a::ip::udp::endpoint Connection::get_our_target(a::ip::udp::endpoint&& their_tar
     return m_players[index];
 }
 
-template<std::size_t index>
-a::awaitable<void> Connection::do_relay()
+a::awaitable<void> Connection::do_relay(std::size_t index)
 {
     std::string name = fmt::format("{} {}<{}>", *this, std::source_location::current().function_name(), index);
     try
@@ -362,7 +358,7 @@ a::awaitable<void> Connection::do_relay()
         {
             a::ip::udp::endpoint from;
             auto bytes_read = co_await receiver.async_receive_from(a::buffer(buffer), from);
-            auto to = get_our_target<index>(std::move(from));
+            auto to = get_our_target(index, std::move(from));
             if (m_debug_counters[index] > 0)
             {
                 --m_debug_counters[index];
@@ -392,7 +388,6 @@ a::awaitable<void> Connection::do_relay()
         co_return;
     }
     l::info("{} stopped", name);
-    co_return;
 }
 
 template <typename FormatContext>
