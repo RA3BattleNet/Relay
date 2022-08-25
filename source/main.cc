@@ -341,7 +341,7 @@ a::awaitable<void> Connection::watchdog()
     SteadyTimer timer{ co_await a::this_coro::executor };
     while (true)
     {
-        if ((m_last_update - m_start_time > 1min)
+        if ((t::steady_clock::now() - m_last_update > 1min)
             or not s0.is_open() or not s1.is_open())
         {
             m_cancelled = true;
