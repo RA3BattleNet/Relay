@@ -164,6 +164,7 @@ a::awaitable<void> process_control_server(a::ip::tcp::iostream connection)
         l::error("Error in control server: {}", e.what());
         connection << Response{ .succeeded = false, .message = e.what() }.to_json();
     }
+    connection.flush();
 }
 
 j::json get_status()
