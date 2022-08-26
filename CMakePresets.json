@@ -38,6 +38,39 @@
       "description": "用 Visual Studio 开发环境定向到 Windows (64 位)。(RelWithDebInfo)",
       "inherits": "x64-debug",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-g++-11-x64-release",
+      "displayName": "Linux x64 Release",
+      "description": "在 64 位 Linux 上使用 g++-11",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "environment": {
+        "CC": "gcc-11",
+        "CXX": "g++-11"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-linux-g++-11-x64-release",
+      "displayName": "Build Linux x64 Release",
+      "description": "在 64 位 Linux 上使用 g++-11 编译",
+      "configurePreset": "linux-g++-11-x64-release"
     }
   ]
 }
