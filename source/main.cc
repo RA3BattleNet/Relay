@@ -115,6 +115,7 @@ int main()
         l::cfg::load_env_levels();
         l::set_default_logger(l::rotating_logger_mt("main", "logs/relay.txt", 1048576 * 5, 3));
         l::flush_every(60s);
+        l::info("public ip is {}", RelayServerNat::instance().public_ip().to_string());
         a::io_context context;
         l::info("starting relay server...");
         auto task = a::co_spawn(context, run_control_server, a::use_future);
@@ -235,15 +236,15 @@ void RelayServerNat::update_ip()
     h::Client client{ "http://api.ipify.org" };
     if (h::Result result = client.Get("/"); result)
     {
-        l::info("obtaining ip, response = {}", result.value().body);
+        l::info("obtaining public ip, response = {}", result.value().body);
         auto new_ip = a::ip::address_v4::from_string(result.value().body);
-        l::info("parsed ip: {}", new_ip.to_string());
+        l::info("parsed public ip: {}", new_ip.to_string());
         std::scoped_lock lock{ m_mutex };
         m_public_ip = new_ip;
     }
     else
     {
-        l::error("failed to obtain ip: {}", h::to_string(result.error()));
+        l::error("failed to obtain public ip: {}", h::to_string(result.error()));
     }
 }
 
@@ -257,15 +258,15 @@ RelayServerNat& RelayServerNat::instance()
         {
             while (true)
             {
+                std::this_thread::sleep_for(30min);
                 try
                 {
                     self.update_ip();
                 }
                 catch (std::exception const& e)
                 {
-                    l::error("error when updating ip: {}", e.what());
+                    l::error("error when updating public ip: {}", e.what());
                 }
-                std::this_thread::sleep_for(30min);
             }
         };
         std::thread{ runner }.detach();
