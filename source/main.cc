@@ -23,6 +23,8 @@ using Udp = a::ip::udp;
 using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
 using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
+a::awaitable<void> run_echo_server();
+void echo_do_receive(Udp::socket& udp_socket, Udp::endpoint& endpoint, char* data);
 a::awaitable<void> run_control_server();
 a::awaitable<void> process_control_server(Tcp::iostream connection);
 j::json get_status();
@@ -115,12 +117,14 @@ int main()
         l::info("public ip is {}", RelayServerNat::instance().public_ip().to_string());
         a::io_context context;
         l::info("starting relay server...");
-        auto task = a::co_spawn(context, run_control_server, a::use_future);
+        auto task_1 = a::co_spawn(context, run_control_server, a::use_future);
+        auto task_2 = a::co_spawn(context, run_echo_server, a::use_future);
         auto runner_1 = std::async(std::launch::async, [&context] { context.run(); });
         auto runner_2 = std::async(std::launch::async, [&context] { context.run(); });
         runner_1.get();
         runner_2.get();
-        task.get();
+        task_1.get();
+        task_2.get();
     }
     catch (std::exception const& e)
     {
@@ -128,6 +132,50 @@ int main()
         return 1;
     }
     return 0;
+}
+
+a::awaitable<void> run_echo_server()
+{
+    Udp::socket udp_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10010 } };
+    Udp::endpoint endpoint;
+    char data[1024];
+
+    while (true)
+    {
+        auto recevied_length = co_await udp_socket.async_receive_from(
+            boost::asio::buffer(data, 1024),
+            endpoint,
+            a::use_awaitable);
+        udp_socket.async_send_to(
+            boost::asio::buffer(data, recevied_length),
+            endpoint,
+            [](boost::system::error_code /*ec*/, std::size_t /*bytes_sent*/)
+            {
+                // Do nothing.
+            });
+    }
+}
+
+void echo_do_receive(Udp::socket& udp_socket, Udp::endpoint& endpoint, char* data)
+{
+    udp_socket.async_receive_from(
+        boost::asio::buffer(data, 1024), endpoint,
+        [&udp_socket, &endpoint, data](boost::system::error_code ec, std::size_t bytes_recvd)
+        {
+            if (!ec && bytes_recvd > 0)
+            {
+                udp_socket.async_send_to(
+                    boost::asio::buffer(data, 1024), endpoint,
+                    [&udp_socket, &endpoint, data](boost::system::error_code /*ec*/, std::size_t /*bytes_sent*/)
+                    {
+                        echo_do_receive(udp_socket, endpoint, data);
+                    });
+            }
+            else
+            {
+                echo_do_receive(udp_socket, endpoint, data);
+            }
+        });
 }
 
 a::awaitable<void> run_control_server()
