@@ -137,21 +137,31 @@ int main()
 a::awaitable<void> run_echo_server()
 {
     Udp::socket udp_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10010 } };
-    Udp::endpoint endpoint;
     char data[1024];
 
     while (true)
     {
+        Udp::endpoint endpoint;
         auto recevied_length = co_await udp_socket.async_receive_from(
             boost::asio::buffer(data, 1024),
             endpoint,
             a::use_awaitable);
+        l::info("UDP Echo received {} bytes", recevied_length);
         udp_socket.async_send_to(
             boost::asio::buffer(data, recevied_length),
             endpoint,
-            [](boost::system::error_code /*ec*/, std::size_t /*bytes_sent*/)
+            [](boost::system::error_code ec, std::size_t bytes_sent)
             {
                 // Do nothing.
+                if (ec.value() != 0)
+                {
+                    l::error("UDP Echo send failed with error code {}", ec.value());
+                    l::error(ec.message());
+                }
+                else
+                {
+                    l::info("UDP Echo sent {} bytes", bytes_sent);
+                }
             });
     }
 }
