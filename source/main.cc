@@ -156,28 +156,6 @@ a::awaitable<void> run_echo_server()
     }
 }
 
-void echo_do_receive(Udp::socket& udp_socket, Udp::endpoint& endpoint, char* data)
-{
-    udp_socket.async_receive_from(
-        boost::asio::buffer(data, 1024), endpoint,
-        [&udp_socket, &endpoint, data](boost::system::error_code ec, std::size_t bytes_recvd)
-        {
-            if (!ec && bytes_recvd > 0)
-            {
-                udp_socket.async_send_to(
-                    boost::asio::buffer(data, 1024), endpoint,
-                    [&udp_socket, &endpoint, data](boost::system::error_code /*ec*/, std::size_t /*bytes_sent*/)
-                    {
-                        echo_do_receive(udp_socket, endpoint, data);
-                    });
-            }
-            else
-            {
-                echo_do_receive(udp_socket, endpoint, data);
-            }
-        });
-}
-
 a::awaitable<void> run_control_server()
 {
     Tcp::endpoint port = { a::ip::address_v4::any(), 10086 };
