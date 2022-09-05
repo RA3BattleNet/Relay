@@ -472,8 +472,8 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
         Udp::endpoint from;
         while (not m_cancelled)
         {
-            std::array<std::byte, 2048> buffer;
-            auto bytes_read = co_await receiver.async_receive_from(a::buffer(buffer), from);
+            std::array<std::byte, 2048> temp_buffer{};
+            auto bytes_read = co_await receiver.async_receive_from(a::buffer(temp_buffer), from);
             auto start = std::chrono::steady_clock::now();
             auto to = get_our_target(index, from);
             m_watchdog_alive_flag = true;
@@ -491,7 +491,7 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
                 );
             }
             auto before_send = std::chrono::steady_clock::now();
-            /*co_await*/ sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
+            /*co_await*/ sender.async_send_to(a::buffer(temp_buffer.data(), bytes_read), to);
             auto after_send = std::chrono::steady_clock::now();
             auto time_before_send = before_send - start;
             auto time_after_send = after_send - start;
