@@ -243,7 +243,7 @@ a::awaitable<void> process_control_server(Tcp::iostream connection)
 
 j::json get_status()
 {
-    std::scoped_lock{ Connection::s_status_report_mutex };
+    std::scoped_lock lock{ Connection::s_status_report_mutex };
 
     j::json status = j::json::object();
     status["CurrentConnections"] = Connection::s_count.load();
@@ -408,7 +408,7 @@ Connection::~Connection()
     auto avg_time_before_send = total_time_before_send / processed_count;
     auto avg_time_after_send = total_time_after_send / processed_count;
 
-    std::scoped_lock{ s_status_report_mutex };
+    std::scoped_lock lock{ s_status_report_mutex };
 
     s_status_report.push_back(ConnectionStatusReport
     {
