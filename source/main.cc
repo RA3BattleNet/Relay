@@ -397,7 +397,7 @@ Connection::Connection(std::array<UdpSocket, 2>&& sockets) :
     max_time_before_send = std::chrono::nanoseconds::zero();
     total_time_after_send = std::chrono::nanoseconds::zero();
     max_time_after_send = std::chrono::nanoseconds::zero();
-    processed_count = 1; // prevent math error
+    processed_count = 0;
 }
 
 Connection::~Connection()
@@ -468,13 +468,11 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
     {
         UdpSocket& receiver = m_sockets[std::size_t{ 1 } - index];
         UdpSocket& sender = m_sockets[index];
-        //std::array<std::byte, 2048>& buffer = m_buffer[index];
-        //Udp::endpoint from;
+        std::array<std::byte, 2048>& buffer = m_buffer[index];
+        Udp::endpoint from;
         while (not m_cancelled)
         {
-            char data[2048];
-            Udp::endpoint from;
-            auto bytes_read = co_await receiver.async_receive_from(a::buffer(data, 2048), from);
+            auto bytes_read = co_await receiver.async_receive_from(a::buffer(buffer), from);
             auto start = std::chrono::steady_clock::now();
             auto to = get_our_target(index, from);
             m_watchdog_alive_flag = true;
@@ -492,7 +490,7 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
                 );
             }
             auto before_send = std::chrono::steady_clock::now();
-            sender.async_send_to(a::buffer(data, bytes_read), to);
+            co_await sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
             auto after_send = std::chrono::steady_clock::now();
             auto time_before_send = before_send - start;
             auto time_after_send = after_send - start;
