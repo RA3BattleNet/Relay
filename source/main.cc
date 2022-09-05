@@ -57,6 +57,27 @@ public:
     void translate(Udp::endpoint& local_endpoint);
 };
 
+struct ConnectionStatusReport
+{
+    std::uintmax_t processed_count;
+    std::chrono::nanoseconds avg_time_before_send;
+    std::chrono::nanoseconds avg_time_after_send;
+    std::chrono::nanoseconds max_time_before_send;
+    std::chrono::nanoseconds max_time_after_send;
+};
+
+void to_json(j::json& j, const ConnectionStatusReport& report)
+{
+    j = j::json
+    {
+        { "ProcessedCount", report.processed_count},
+        { "AverageTimeBeforeSend", report.avg_time_before_send.count()},
+        { "AverageTimeAfterSend", report.avg_time_after_send.count()},
+        { "MaxTimeBeforeSend", report.max_time_before_send.count()},
+        { "MaxTimeAfterSend", report.max_time_after_send.count()}
+    };
+}
+
 class Connection
 {
 public:
@@ -68,6 +89,8 @@ public:
 public:
     inline static std::atomic<std::uintmax_t> s_count = 0; // 统计存活的连接数量
     inline static std::atomic<std::uintmax_t> s_counter = 0;
+    inline static std::mutex s_status_report_mutex;
+    inline static std::vector<ConnectionStatusReport> s_status_report;
 private:
     std::uintmax_t m_id = ++s_counter;
     std::array<int, 2> m_debug_counters = { 3, 3 };
@@ -77,6 +100,11 @@ private:
     std::array<Udp::endpoint, 2> m_players; // 记录连接的两个玩家的地址
     std::array<UdpSocket, 2> m_sockets; // 与玩家连接的套接字
     std::future<std::array<Udp::endpoint, 2>> m_server_local_endpoints; // 获取用于联通两个玩家的端口号
+    std::chrono::nanoseconds total_time_before_send;
+    std::chrono::nanoseconds max_time_before_send;
+    std::chrono::nanoseconds total_time_after_send;
+    std::chrono::nanoseconds max_time_after_send;
+    std::uintmax_t processed_count;
 
 public:
     static a::awaitable<std::array<Udp::endpoint, 2>> start_relay
@@ -215,10 +243,13 @@ a::awaitable<void> process_control_server(Tcp::iostream connection)
 
 j::json get_status()
 {
+    std::scoped_lock{ Connection::s_status_report_mutex };
+
     j::json status = j::json::object();
     status["CurrentConnections"] = Connection::s_count.load();
     status["AllConnections"] = Connection::s_counter.load();
     status["PublicIp"] = RelayServerNat::instance().public_ip().to_string();
+    status["ConnectionStatusReport"] = Connection::s_status_report;
     return status;
 }
 
@@ -361,12 +392,42 @@ Connection::Connection(std::array<UdpSocket, 2>&& sockets) :
 {
     ++s_count;
     l::info("{} is being created", *this);
+
+    total_time_before_send = std::chrono::nanoseconds::zero();
+    max_time_before_send = std::chrono::nanoseconds::zero();
+    total_time_after_send = std::chrono::nanoseconds::zero();
+    max_time_after_send = std::chrono::nanoseconds::zero();
+    processed_count = 0;
 }
 
 Connection::~Connection()
 {
     l::info("{} is being destroyed", *this);
     --s_count;
+
+    auto avg_time_before_send = total_time_before_send / processed_count;
+    auto avg_time_after_send = total_time_after_send / processed_count;
+
+    std::scoped_lock{ s_status_report_mutex };
+
+    s_status_report.push_back(ConnectionStatusReport
+    {
+        .processed_count = processed_count,
+        .avg_time_before_send = avg_time_before_send,
+        .avg_time_after_send = avg_time_after_send,
+        .max_time_before_send = max_time_before_send,
+        .max_time_after_send = max_time_after_send
+    });
+
+    l::debug
+    (
+        "Processed {} packages, avg time before send is {} ns, avg time after send is {} ns, max time before send is {} ns, max time after send is {} ns",
+        processed_count,
+        avg_time_before_send.count(),
+        avg_time_after_send.count(),
+        max_time_before_send.count(),
+        max_time_after_send.count()
+    );
 }
 
 a::awaitable<void> Connection::watchdog()
@@ -412,6 +473,7 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
         while (not m_cancelled)
         {
             auto bytes_read = co_await receiver.async_receive_from(a::buffer(buffer), from);
+            auto start = std::chrono::steady_clock::now();
             auto to = get_our_target(index, from);
             m_watchdog_alive_flag = true;
             if (m_debug_counters[index] > 0)
@@ -427,7 +489,22 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
                     to
                 );
             }
+            auto before_send = std::chrono::steady_clock::now();
             co_await sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
+            auto after_send = std::chrono::steady_clock::now();
+            auto time_before_send = before_send - start;
+            auto time_after_send = after_send - start;
+            if (time_before_send > max_time_before_send)
+            {
+                max_time_before_send = time_before_send;
+            }
+            if (time_after_send > max_time_after_send)
+            {
+                max_time_after_send = time_after_send;
+            }
+            total_time_before_send += time_before_send;
+            total_time_after_send += time_after_send;
+            processed_count++;
         }
     }
     catch (std::exception const& e)
