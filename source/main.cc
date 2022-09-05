@@ -468,11 +468,13 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
     {
         UdpSocket& receiver = m_sockets[std::size_t{ 1 } - index];
         UdpSocket& sender = m_sockets[index];
-        std::array<std::byte, 2048>& buffer = m_buffer[index];
-        Udp::endpoint from;
+        //std::array<std::byte, 2048>& buffer = m_buffer[index];
+        //Udp::endpoint from;
         while (not m_cancelled)
         {
-            auto bytes_read = co_await receiver.async_receive_from(a::buffer(buffer), from);
+            char* data = new char[2048];
+            Udp::endpoint from;
+            auto bytes_read = co_await receiver.async_receive_from(a::buffer(data, 2048), from);
             auto start = std::chrono::steady_clock::now();
             auto to = get_our_target(index, from);
             m_watchdog_alive_flag = true;
@@ -490,7 +492,15 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
                 );
             }
             auto before_send = std::chrono::steady_clock::now();
-            co_await sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
+            sender.async_send_to(a::buffer(data, bytes_read), to, 
+                [data, name](boost::system::error_code ec, std::size_t bytes_recvd)
+                {
+                    if (ec.value() != 0)
+                    {
+                        l::error("{} async send to error: {}", name, ec.message());
+                    }
+                    delete[] data;
+                });
             auto after_send = std::chrono::steady_clock::now();
             auto time_before_send = before_send - start;
             auto time_after_send = after_send - start;
