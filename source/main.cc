@@ -490,7 +490,7 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
                 );
             }
             auto before_send = std::chrono::steady_clock::now();
-            co_await sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
+            /*co_await*/ sender.async_send_to(a::buffer(buffer.data(), bytes_read), to);
             auto after_send = std::chrono::steady_clock::now();
             auto time_before_send = before_send - start;
             auto time_after_send = after_send - start;
