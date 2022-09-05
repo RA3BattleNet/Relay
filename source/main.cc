@@ -469,10 +469,11 @@ a::awaitable<void> Connection::do_relay(std::size_t index)
         UdpSocket& receiver = m_sockets[std::size_t{ 1 } - index];
         UdpSocket& sender = m_sockets[index];
         //std::array<std::byte, 2048>& buffer = m_buffer[index];
-        Udp::endpoint from;
+        //Udp::endpoint from;
         while (not m_cancelled)
         {
             std::array<std::byte, 2048> temp_buffer{};
+            Udp::endpoint from;
             auto bytes_read = co_await receiver.async_receive_from(a::buffer(temp_buffer), from);
             auto start = std::chrono::steady_clock::now();
             auto to = get_our_target(index, from);
