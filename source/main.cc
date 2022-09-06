@@ -397,7 +397,7 @@ Connection::Connection(std::array<UdpSocket, 2>&& sockets) :
     max_time_before_send = std::chrono::nanoseconds::zero();
     total_time_after_send = std::chrono::nanoseconds::zero();
     max_time_after_send = std::chrono::nanoseconds::zero();
-    processed_count = 0;
+    processed_count = 1; // prevent math error
 }
 
 Connection::~Connection()
