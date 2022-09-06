@@ -410,14 +410,14 @@ Connection::~Connection()
 
     std::scoped_lock lock{ s_status_report_mutex };
 
-    s_status_report.push_back(ConnectionStatusReport
-    {
-        .processed_count = processed_count,
-        .avg_time_before_send = avg_time_before_send,
-        .avg_time_after_send = avg_time_after_send,
-        .max_time_before_send = max_time_before_send,
-        .max_time_after_send = max_time_after_send
-    });
+    //s_status_report.push_back(ConnectionStatusReport
+    //{
+    //    .processed_count = processed_count,
+    //    .avg_time_before_send = avg_time_before_send,
+    //    .avg_time_after_send = avg_time_after_send,
+    //    .max_time_before_send = max_time_before_send,
+    //    .max_time_after_send = max_time_after_send
+    //});
 
     l::debug
     (
