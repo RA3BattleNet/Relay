@@ -664,7 +664,7 @@ a::awaitable<void> NetnegPlusConnection::start_control()
 
             l::info
             (
-                "NATNEG+ control create following info: player_1 endpoint {}, player_1 token, player_2 endpoint {}, player_2 token {}",
+                "NATNEG+ control create following info: player_1 endpoint {}, player_1 token {}, player_2 endpoint {}, player_2 token {}",
                 player_1,
                 token_1,
                 player_2,
