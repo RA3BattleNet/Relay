@@ -661,6 +661,15 @@ a::awaitable<void> NetnegPlusConnection::start_control()
             ip_2 = htonl(ip_2);
             std::uint16_t port_2 = player_1.port();
             port_2 = htons(port_2);
+
+            l::info
+            (
+                "NATNEG+ control create following info: player_1 endpoint {}, player_1 token, player_2 endpoint {}, player_2 token {}",
+                player_1,
+                token_1,
+                player_2,
+                token_2
+            );
             char response_1[16];
             memcpy(response_1, "CONNECT", 7);
             memcpy(response_1 + 7, &token_1, 2);
@@ -717,7 +726,7 @@ a::awaitable<void> NetnegPlusConnection::start_relay()
         auto& target = s_router_map[token];
         if (target == std::pair<Udp::endpoint, bool>())
         {
-            l::error("Invalid token");
+            l::error("Invalid token {}", token);
             continue;
         }
         target.second = true;
