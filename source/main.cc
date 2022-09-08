@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <random>
 #include <source_location>
 
 namespace a = boost::asio;
@@ -24,7 +25,6 @@ using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
 using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
 a::awaitable<void> run_echo_server();
-void echo_do_receive(Udp::socket& udp_socket, Udp::endpoint& endpoint, char* data);
 a::awaitable<void> run_control_server();
 a::awaitable<void> process_control_server(Tcp::iostream connection);
 j::json get_status();
@@ -123,6 +123,22 @@ public:
     a::awaitable<void> do_relay(std::size_t index);
 };
 
+class NetnegPlusConnection
+{
+public:
+    inline static std::mutex s_router_map_mutex;
+    inline static std::array<std::pair<Udp::endpoint, bool>, std::numeric_limits<std::uint16_t>::max() + 1>s_router_map; // 标记每个token应该转发到哪里，以及alive flag
+    inline static std::map<std::uint32_t, std::vector<Udp::endpoint>> s_natneg_map;  // 每个natneg session的缓存
+
+private:
+    static bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
+
+public:
+    static a::awaitable<void> start_control();
+    static a::awaitable<void> start_relay();
+    static a::awaitable<void> watchdog();
+};
+
 struct EndPointFormatter : fmt::formatter<std::string>
 {
     template <typename FormatContext>
@@ -134,6 +150,9 @@ struct fmt::formatter<Connection> : Connection::Formatter {};
 
 template<>
 struct fmt::formatter<Udp::endpoint> : EndPointFormatter {};
+
+std::minstd_rand rng{ std::random_device{}() };
+std::uniform_int_distribution<std::uint16_t> distribute;
 
 int main()
 {
@@ -149,10 +168,29 @@ int main()
         auto task_2 = a::co_spawn(context, run_echo_server, a::use_future);
         auto runner_1 = std::async(std::launch::async, [&context] { context.run(); });
         auto runner_2 = std::async(std::launch::async, [&context] { context.run(); });
+
+        a::io_context natneg_plus_context;
+        auto netnag_plus_relay_server = a::co_spawn
+        (
+            natneg_plus_context,
+            NetnegPlusConnection::start_relay,
+            a::use_future
+        );
+        auto netnag_plus_control_server = a::co_spawn
+        (
+            natneg_plus_context,
+            NetnegPlusConnection::start_control,
+            a::use_future
+        );
+        auto netnag_plus_runner = std::async(std::launch::async, [&natneg_plus_context] { natneg_plus_context.run(); });
+
         runner_1.get();
         runner_2.get();
+        netnag_plus_runner.get();
         task_1.get();
         task_2.get();
+        netnag_plus_relay_server.get();
+        netnag_plus_control_server.get();
     }
     catch (std::exception const& e)
     {
@@ -192,6 +230,11 @@ a::awaitable<void> run_echo_server()
                 }
             });
     }
+}
+
+a::awaitable<void> run_natneg_plus_server()
+{
+    co_await(NetnegPlusConnection::start_control() and NetnegPlusConnection::start_relay() and NetnegPlusConnection::watchdog());
 }
 
 a::awaitable<void> run_control_server()
@@ -542,4 +585,153 @@ template <typename FormatContext>
 auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -> decltype(ctx.out())
 {
     return fmt::format_to(ctx.out(), "{}:{}", input.address().to_string(), input.port());
+}
+
+bool NetnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
+{
+    auto itr = s_natneg_map.find(id);
+    if (itr != s_natneg_map.end())
+    {
+        if (itr->second.size() < 2)
+        {
+            itr->second.push_back(endpoint);
+            return true;
+        }
+        // Received more than two INIT, impossibe, clean it.
+        else
+        {
+            itr->second.clear();
+            itr->second.push_back(endpoint);
+            return false;
+        }
+    }
+    else
+    {
+        s_natneg_map.insert(std::make_pair(id, std::vector<Udp::endpoint>(1, endpoint)));
+        return false;
+    }
+}
+
+a::awaitable<void> NetnegPlusConnection::start_control()
+{
+    //std::scoped_lock lock{ NetnegPlusConnection::s_natneg_map };
+    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10087 } };
+    while (true)
+    {
+        char control_data[64];
+        Udp::endpoint endpoint;
+        auto recevied_length = co_await control_socket.async_receive_from
+        (
+            boost::asio::buffer(control_data, 64),
+            endpoint,
+            a::use_awaitable
+        );
+        if (recevied_length != 4)
+        {
+            l::error("NATNEG+ control received invalid length {} bytes", recevied_length);
+            continue;
+        }
+        // Parse input
+        std::uint32_t session_id;
+        memcpy(&session_id, control_data, 4);
+        if (store_natneg_map(session_id, endpoint))
+        {
+            // Create relay here.
+            auto player_1 = s_natneg_map[session_id][0];
+            auto player_2 = s_natneg_map[session_id][1];
+            std::uint16_t token_1 = distribute(rng);
+            while (NetnegPlusConnection::s_router_map[token_1] != std::pair<Udp::endpoint, bool>())
+            {
+                token_1 = distribute(rng);
+            }
+            std::uint16_t token_2 = distribute(rng);
+            while (NetnegPlusConnection::s_router_map[token_2] != std::pair<Udp::endpoint, bool>())
+            {
+                token_2 = distribute(rng);
+            }
+            NetnegPlusConnection::s_router_map[token_1] = std::make_pair(player_2, true);
+            NetnegPlusConnection::s_router_map[token_2] = std::make_pair(player_1, true);
+
+            // Send message here.
+            std::uint32_t ip_1 = player_1.address().to_v4().to_ulong();
+            ip_1 = htonl(ip_1);
+            std::uint16_t port_1 = player_1.port();
+            port_1 = htons(port_1);
+            std::uint32_t ip_2 = player_2.address().to_v4().to_ulong();
+            ip_2 = htonl(ip_2);
+            std::uint16_t port_2 = player_1.port();
+            port_2 = htons(port_2);
+            char response_1[16];
+            memcpy(response_1, "CONNECT", 7);
+            memcpy(response_1 + 7, &token_1, 2);
+            memcpy(response_1 + 9, &ip_2, 4);
+            memcpy(response_1 + 13, &port_2, 2);
+            char response_2[16];
+            memcpy(response_2, "CONNECT", 7);
+            memcpy(response_2 + 7, &token_2, 2);
+            memcpy(response_2 + 9, &ip_1, 4);
+            memcpy(response_2 + 13, &port_1, 2);
+            co_await
+            (
+                control_socket.async_send_to
+                (
+                    a::buffer(response_1, 15),
+                    player_1,
+                    a::use_awaitable
+                )
+                and
+                control_socket.async_send_to
+                (
+                    a::buffer(response_2, 15),
+                    player_2,
+                    a::use_awaitable
+                )
+            );
+        }
+    }
+}
+
+a::awaitable<void> NetnegPlusConnection::start_relay()
+{
+    watchdog();
+    Udp::socket relay_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10088 } };
+    while (true)
+    {
+        char relay_data[2048];
+        Udp::endpoint endpoint;
+        auto recevied_length = co_await relay_socket.async_receive_from
+        (
+            boost::asio::buffer(relay_data, 2048),
+            endpoint,
+            a::use_awaitable
+        );
+        if (recevied_length < 2)
+        {
+            l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
+            continue;
+        }
+        // Parse to get token
+        std::uint16_t token;
+        memcpy(&token, relay_data, 2);
+        // Obtain endpoint, set alive flag, then send.
+        auto& target = s_router_map[token];
+        if (target == std::pair<Udp::endpoint, bool>())
+        {
+            l::error("Invalid token");
+            continue;
+        }
+        target.second = true;
+        co_await relay_socket.async_send_to
+        (
+            a::buffer(relay_data + 2, recevied_length - 2),
+            target.first,
+            a::use_awaitable
+        );
+    }
+}
+
+a::awaitable<void> NetnegPlusConnection::watchdog()
+{
+    // Clean dead connection.
+    co_return;
 }
