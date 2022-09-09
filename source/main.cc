@@ -128,11 +128,10 @@ class NetnegPlusConnection
 public:
     inline static std::mutex s_router_map_mutex;
     inline static std::array<std::pair<Udp::endpoint, bool>, std::numeric_limits<std::uint16_t>::max() + 1>s_router_map; // 标记每个token应该转发到哪里，以及alive flag
-    inline static std::map<std::uint32_t, std::array<Udp::endpoint, 2>> s_natneg_map;  // 每个natneg session的缓存
-    inline static std::map<std::uint32_t, std::array<Udp::endpoint, 2>> s_natneg_communicate_map;  // 每个natneg session communicate的缓存
+    inline static std::map<std::uint32_t, std::vector<Udp::endpoint>> s_natneg_map;  // 每个natneg session的缓存
 
 private:
-    static bool store_natneg_map(std::uint32_t id, std::uint8_t packet_id, std::uint8_t player_id, Udp::endpoint endpoint);
+    static bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
 
 public:
     static a::awaitable<void> start_control();
@@ -588,52 +587,29 @@ auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -
     return fmt::format_to(ctx.out(), "{}:{}", input.address().to_string(), input.port());
 }
 
-bool NetnegPlusConnection::store_natneg_map(std::uint32_t id, std::uint8_t packet_id, std::uint8_t player_id, Udp::endpoint endpoint)
+bool NetnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
 {
-    if (player_id > 1)
+    auto itr = s_natneg_map.find(id);
+    if (itr != s_natneg_map.end())
     {
-        l::error("Invalid player id {}", player_id);
-        return false;
-    }
-    if (packet_id == '\x00')
-    {
-        auto itr = s_natneg_map.find(id);
-        if (itr != s_natneg_map.end())
+        if (itr->second.size() < 2)
         {
-            itr->second[player_id] = endpoint;
+            itr->second.push_back(endpoint);
+            return true;
         }
+        // Received more than two INIT, impossibe, clean it.
         else
         {
-            s_natneg_map.insert(std::make_pair(id, std::array<Udp::endpoint, 2>()));
-            s_natneg_map[id][player_id] = endpoint;
-            return false;
-        }
-    }
-    else if (packet_id == '\x01')
-    {
-        auto itr = s_natneg_communicate_map.find(id);
-        if (itr != s_natneg_communicate_map.end())
-        {
-            itr->second[player_id] = endpoint;
-        }
-        else
-        {
-            s_natneg_communicate_map.insert(std::make_pair(id, std::array<Udp::endpoint, 2>()));
-            s_natneg_communicate_map[id][player_id] = endpoint;
+            itr->second.clear();
+            itr->second.push_back(endpoint);
             return false;
         }
     }
     else
     {
-        l::error("Invalid packet id {}", packet_id);
+        s_natneg_map.insert(std::make_pair(id, std::vector<Udp::endpoint>(1, endpoint)));
         return false;
     }
-    return s_natneg_map.contains(id)
-        and s_natneg_map[id][0] != Udp::endpoint()
-        and s_natneg_map[id][0] != Udp::endpoint()
-        and s_natneg_communicate_map.contains(id)
-        and s_natneg_communicate_map[id][0] != Udp::endpoint()
-        and s_natneg_communicate_map[id][0] != Udp::endpoint();
 }
 
 a::awaitable<void> NetnegPlusConnection::start_control()
@@ -658,17 +634,11 @@ a::awaitable<void> NetnegPlusConnection::start_control()
         // Parse input
         std::uint32_t session_id;
         memcpy(&session_id, control_data, 4);
-        std::uint8_t packet_id;
-        memcpy(&packet_id, control_data + 4, 1);
-        std::uint8_t player_id;
-        memcpy(&player_id, control_data + 5, 1);
-        if (store_natneg_map(session_id, packet_id, player_id, endpoint))
+        if (store_natneg_map(session_id, endpoint))
         {
             // Create relay here.
             auto player_1 = s_natneg_map[session_id][0];
             auto player_2 = s_natneg_map[session_id][1];
-            auto player_communicate_1 = s_natneg_communicate_map[session_id][0];
-            auto player_communicate_2 = s_natneg_communicate_map[session_id][1];
             std::uint16_t token_1 = distribute(rng);
             while (NetnegPlusConnection::s_router_map[token_1] != std::pair<Udp::endpoint, bool>())
             {
@@ -715,14 +685,14 @@ a::awaitable<void> NetnegPlusConnection::start_control()
                 control_socket.async_send_to
                 (
                     a::buffer(response_1, 15),
-                    player_communicate_1,
+                    player_1,
                     a::use_awaitable
                 )
                 and
                 control_socket.async_send_to
                 (
                     a::buffer(response_2, 15),
-                    player_communicate_2,
+                    player_2,
                     a::use_awaitable
                 )
             );
