@@ -640,17 +640,17 @@ a::awaitable<void> NetnegPlusConnection::start_control()
             auto player_1 = s_natneg_map[session_id][0];
             auto player_2 = s_natneg_map[session_id][1];
             std::uint16_t token_1 = distribute(rng);
-            while (NetnegPlusConnection::s_router_map[token_1] != std::pair<Udp::endpoint, bool>())
+            while (s_router_map[token_1] != std::pair<Udp::endpoint, bool>())
             {
                 token_1 = distribute(rng);
             }
             std::uint16_t token_2 = distribute(rng);
-            while (NetnegPlusConnection::s_router_map[token_2] != std::pair<Udp::endpoint, bool>())
+            while (s_router_map[token_2] != std::pair<Udp::endpoint, bool>())
             {
                 token_2 = distribute(rng);
             }
-            NetnegPlusConnection::s_router_map[token_1] = std::make_pair(player_2, true);
-            NetnegPlusConnection::s_router_map[token_2] = std::make_pair(player_1, true);
+            s_router_map[token_1] = std::make_pair(player_2, true);
+            s_router_map[token_2] = std::make_pair(player_1, true);
 
             // Send message here.
             std::uint32_t ip_1 = player_1.address().to_v4().to_ulong();
@@ -696,6 +696,8 @@ a::awaitable<void> NetnegPlusConnection::start_control()
                     a::use_awaitable
                 )
             );
+            // Remove map
+            s_natneg_map.erase(session_id);
         }
     }
 }
@@ -742,5 +744,22 @@ a::awaitable<void> NetnegPlusConnection::start_relay()
 a::awaitable<void> NetnegPlusConnection::watchdog()
 {
     // Clean dead connection.
+    boost::asio::use_awaitable_t<>::as_default_on_t<boost::asio::steady_timer> timer{ co_await boost::asio::this_coro::executor };
+    while (true)
+    {
+        for (auto& route : s_router_map)
+        {
+            if (not route.second)
+            {
+                route = std::pair<Udp::endpoint, bool>();
+            }
+            else
+            {
+                route.second = false;
+            }
+        }
+        timer.expires_after(45s);
+        co_await timer.async_wait();
+    };
     co_return;
 }
