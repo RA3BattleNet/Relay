@@ -202,6 +202,7 @@ int main()
 
 a::awaitable<void> run_echo_server()
 {
+    l::info("UDP Echo start!");
     Udp::socket udp_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10010 } };
     char data[1024];
 
@@ -212,7 +213,6 @@ a::awaitable<void> run_echo_server()
             boost::asio::buffer(data, 1024),
             endpoint,
             a::use_awaitable);
-        l::info("UDP Echo received {} bytes", recevied_length);
         udp_socket.async_send_to(
             boost::asio::buffer(data, recevied_length),
             endpoint,
@@ -223,10 +223,6 @@ a::awaitable<void> run_echo_server()
                 {
                     l::error("UDP Echo send failed with error code {}", ec.value());
                     l::error(ec.message());
-                }
-                else
-                {
-                    l::info("UDP Echo sent {} bytes", bytes_sent);
                 }
             });
     }
