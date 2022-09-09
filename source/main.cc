@@ -772,6 +772,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             continue;
         }
         target.watchdog_alive_flag = true;
+        linked.watchdog_alive_flag = true;
         linked.endpoint = endpoint;
         if (target.debug_counter < 8)
         {
