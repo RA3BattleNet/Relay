@@ -744,7 +744,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
         // Obtain endpoint, set watchdog_alive_flag flag, then send.
         auto& target = m_router_map[token];
         auto& linked = m_router_map[target.linked];
-        if (not target.valid or linked.valid)
+        if (not (target.valid and linked.valid))
         {
             l::error("NATNEG+ relay: invalid token={}, linked={}", token, target.linked);
             continue;
