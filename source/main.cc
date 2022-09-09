@@ -591,7 +591,11 @@ auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -
 
 a::awaitable<void> NatnegPlusConnection::run()
 {
-    co_await(start_control() and start_relay() and watchdog());
+    auto executor = co_await a::this_coro::executor;
+    a::co_spawn(executor, start_control(), a::detached);
+    a::co_spawn(executor, start_relay(), a::detached);
+    a::co_spawn(executor, watchdog(), a::detached);
+    l::info("All NATNEG+ services started.");
 }
 
 bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
@@ -624,6 +628,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
     {
         std::array<std::byte, 64> control_data = {};
         Udp::endpoint endpoint;
+        l::info("NATNEG+ control awaiting for next request...");
         auto received_length = co_await control_socket.async_receive_from
         (
             boost::asio::buffer(control_data),
@@ -725,6 +730,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
 {
     Udp::endpoint bind_address = { a::ip::address_v4::any(), 10088 };
     Udp::socket relay_socket = { co_await a::this_coro::executor, bind_address };
+    l::info("NATNEG+ relay starting...");
     std::byte relay_data[2048] = {};
     while (true)
     {
