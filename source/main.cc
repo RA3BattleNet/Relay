@@ -684,11 +684,13 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
             l::info
             (
-                "NATNEG+ control create following info: player_1 endpoint {}, player_1 token {}, player_2 endpoint {}, player_2 token {}",
+                "NATNEG+ control create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
                 player_1,
                 token_1,
+                m_router_map[token_1].linked,
                 player_2,
-                token_2
+                token_2,
+                m_router_map[token_2].linked
             );
             char response_1[16];
             std::memcpy(response_1, "CONNECT", 7);
