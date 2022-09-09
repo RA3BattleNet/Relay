@@ -782,6 +782,11 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
     {
         for (Route& route : m_router_map)
         {
+            if (not route.valid)
+            {
+                continue;
+            }
+
             if (route.watchdog_alive_flag)
             {
                 route.watchdog_alive_flag = false;
