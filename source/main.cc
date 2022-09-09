@@ -117,10 +117,13 @@ class NatnegPlusConnection
 public:
     struct Route
     {
+        inline static constexpr std::uint8_t debug_limit = 8;
+
         Udp::endpoint endpoint;
         std::uint16_t linked = 0;
-        bool watchdog_alive_flag;
-        bool valid;
+        std::uint8_t debug_counter = debug_limit + 1;
+        bool watchdog_alive_flag = false;
+        bool valid = false;
     };
 private:
     inline static constexpr std::size_t router_map_size = std::numeric_limits<std::uint16_t>::max() + 1;
@@ -664,6 +667,11 @@ a::awaitable<void> NatnegPlusConnection::start_control()
                 .watchdog_alive_flag = true,
                 .valid = true
             };
+            if (spdlog::get_level() <= spdlog::level::debug)
+            {
+                m_router_map[token_1].debug_counter = 0;
+                m_router_map[token_2].debug_counter = 0;
+            }
             // Send message here.
             std::uint32_t ip_1 = player_1.address().to_v4().to_ulong();
             ip_1 = htonl(ip_1);
@@ -713,7 +721,8 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
 a::awaitable<void> NatnegPlusConnection::start_relay()
 {
-    Udp::socket relay_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10088 } };
+    Udp::endpoint bind_address = { a::ip::address_v4::any(), 10088 };
+    Udp::socket relay_socket = { co_await a::this_coro::executor, bind_address };
     std::byte relay_data[2048] = {};
     while (true)
     {
@@ -742,6 +751,18 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
         }
         target.watchdog_alive_flag = true;
         linked.endpoint = endpoint;
+        if (target.debug_counter < 8)
+        {
+            ++target.debug_counter;
+            l::debug
+            (
+                "NATNEG+ relay: token {} (linked {}) received from {}, sending to {}",
+                token,
+                target.linked,
+                endpoint,
+                target.endpoint
+            );
+        }
         co_await relay_socket.async_send_to
         (
             a::buffer(relay_data + 2, received_length - 2),
@@ -763,8 +784,8 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
             {
                 route.watchdog_alive_flag = false;
                 continue;
-
             }
+
             auto token = &route - m_router_map.data();
             l::info("NATNEG+ watchdog clearing dead connection token={}, linked={}", token, route.linked);
             route = { .valid = false };
