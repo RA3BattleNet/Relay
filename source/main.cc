@@ -591,11 +591,14 @@ auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -
 
 a::awaitable<void> NatnegPlusConnection::run()
 {
-    auto executor = co_await a::this_coro::executor;
-    a::co_spawn(executor, start_control(), a::detached);
-    a::co_spawn(executor, start_relay(), a::detached);
-    a::co_spawn(executor, watchdog(), a::detached);
-    l::info("All NATNEG+ services started.");
+    try
+    {
+        co_await(start_control() and start_relay() and watchdog());
+    }
+    catch (std::exception const& e)
+    {
+        l::error("NATNEG+ service error: {}", e.what());
+    }
 }
 
 bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
