@@ -171,11 +171,11 @@ int main()
 
         a::io_context natneg_plus_context;
         NatnegPlusConnection natneg_plus_connection;
-        a::co_spawn
+        auto natneg_plus_task = a::co_spawn
         (
             natneg_plus_context,
             natneg_plus_connection.run(),
-            a::detached
+            a::use_future
         );
         try
         {
@@ -186,6 +186,7 @@ int main()
             l::critical("natneg_plus_context is terminating because: {}", e.what());
         }
         l::critical("natneg_plus_context finished");
+        natneg_plus_task.get();
 
         runner_1.get();
         runner_2.get();
