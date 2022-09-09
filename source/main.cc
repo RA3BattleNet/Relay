@@ -177,11 +177,18 @@ int main()
             natneg_plus_connection.run(),
             a::detached
         );
-        auto netnag_plus_runner = std::async(std::launch::async, [&natneg_plus_context] { natneg_plus_context.run(); });
+        try
+        {
+            natneg_plus_context.run();
+        }
+        catch (std::exception const& e)
+        {
+            l::critical("natneg_plus_context is terminating because: {}", e.what());
+        }
+        l::critical("natneg_plus_context finished");
 
         runner_1.get();
         runner_2.get();
-        netnag_plus_runner.get();
         task_1.get();
         task_2.get();
     }
