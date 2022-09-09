@@ -130,10 +130,9 @@ private:
     std::array<Route, router_map_size> m_router_map; // 标记每个token应该转发到哪里，以及watchdog_alive_flag flag
     std::map<std::uint32_t, std::vector<Udp::endpoint>> m_natneg_map;  // 每个natneg session的缓存
 
-public:
-    a::awaitable<void> run();
 private:
     bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
+public:
     a::awaitable<void> start_control();
     a::awaitable<void> start_relay();
     a::awaitable<void> watchdog();
@@ -171,10 +170,22 @@ int main()
 
         a::io_context natneg_plus_context;
         NatnegPlusConnection natneg_plus_connection;
-        auto natneg_plus_task = a::co_spawn
+        auto natneg_plus_control_task = a::co_spawn
         (
             natneg_plus_context,
-            natneg_plus_connection.run(),
+            natneg_plus_connection.start_control(),
+            a::use_future
+        );
+        auto natneg_plus_relay_task = a::co_spawn
+        (
+            natneg_plus_context,
+            natneg_plus_connection.start_relay(),
+            a::use_future
+        );
+        auto natneg_plus_relay_watchdog = a::co_spawn
+        (
+            natneg_plus_context,
+            natneg_plus_connection.watchdog(),
             a::use_future
         );
         try
@@ -186,7 +197,9 @@ int main()
             l::critical("natneg_plus_context is terminating because: {}", e.what());
         }
         l::critical("natneg_plus_context finished");
-        natneg_plus_task.get();
+        natneg_plus_control_task.get();
+        natneg_plus_relay_task.get();
+        natneg_plus_relay_watchdog.get();
 
         runner_1.get();
         runner_2.get();
@@ -595,18 +608,6 @@ template <typename FormatContext>
 auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -> decltype(ctx.out())
 {
     return fmt::format_to(ctx.out(), "{}:{}", input.address().to_string(), input.port());
-}
-
-a::awaitable<void> NatnegPlusConnection::run()
-{
-    try
-    {
-        co_await(start_control() and start_relay() and watchdog());
-    }
-    catch (std::exception const& e)
-    {
-        l::error("NATNEG+ service error: {}", e.what());
-    }
 }
 
 bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
