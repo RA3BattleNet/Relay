@@ -655,20 +655,22 @@ a::awaitable<void> NatnegPlusConnection::start_control()
         // Parse input
         std::uint32_t session_id;
         std::memcpy(&session_id, control_data.data(), sizeof(session_id));
+        l::info("NATNEG+ control processing request of {}...", session_id);
         if (store_natneg_map(session_id, endpoint))
         {
+            l::info("NATNEG+ control see request of {} is ready, creating connection...", session_id);
             // Create relay here.
             auto player_1 = m_natneg_map[session_id][0];
             auto player_2 = m_natneg_map[session_id][1];
             std::uint16_t token_1 = distribute(rng);
-            while (not m_router_map[token_1].valid)
+            while (m_router_map[token_1].valid)
             {
-                token_1 = distribute(rng);
+                ++token_1;
             }
             std::uint16_t token_2 = distribute(rng);
-            while (m_router_map[token_2].valid)
+            while (m_router_map[token_2].valid or token_2 == token_1)
             {
-                token_2 = distribute(rng);
+                ++token_2;
             }
             m_router_map[token_1] =
             {
