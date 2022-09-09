@@ -173,19 +173,19 @@ int main()
         auto natneg_plus_control_task = a::co_spawn
         (
             natneg_plus_context,
-            natneg_plus_connection.start_control(),
+            [&c = natneg_plus_connection] { return c.start_control(); },
             a::use_future
         );
         auto natneg_plus_relay_task = a::co_spawn
         (
             natneg_plus_context,
-            natneg_plus_connection.start_relay(),
+            [&c = natneg_plus_connection] { return c.start_relay(); },
             a::use_future
         );
         auto natneg_plus_relay_watchdog = a::co_spawn
         (
             natneg_plus_context,
-            natneg_plus_connection.watchdog(),
+            [&c = natneg_plus_connection] { return c.watchdog(); },
             a::use_future
         );
         try
