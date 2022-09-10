@@ -748,50 +748,57 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
     std::byte relay_data[2048] = {};
     while (true)
     {
-        Udp::endpoint endpoint;
-        auto received_length = co_await relay_socket.async_receive_from
-        (
-            boost::asio::buffer(relay_data),
-            endpoint,
-            a::use_awaitable
-        );
-        if (received_length < 2)
+        try
         {
-            l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
-            continue;
-        }
-        // Parse to get token
-        std::uint16_t token;
-        std::memcpy(&token, relay_data, 2);
-        // Obtain endpoint, set watchdog_alive_flag flag, then send.
-        auto& target = m_router_map[token];
-        auto& linked = m_router_map[target.linked];
-        if (not (target.valid and linked.valid))
-        {
-            l::error("NATNEG+ relay: invalid token={}, linked={}", token, target.linked);
-            continue;
-        }
-        target.watchdog_alive_flag = true;
-        linked.watchdog_alive_flag = true;
-        linked.endpoint = endpoint;
-        if (target.debug_counter < 8)
-        {
-            ++target.debug_counter;
-            l::debug
+            Udp::endpoint endpoint;
+            auto received_length = co_await relay_socket.async_receive_from
             (
-                "NATNEG+ relay: token {} (linked {}) received from {}, sending to {}",
-                token,
-                target.linked,
+                boost::asio::buffer(relay_data),
                 endpoint,
-                target.endpoint
+                a::use_awaitable
+            );
+            if (received_length < 2)
+            {
+                l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
+                continue;
+            }
+            // Parse to get token
+            std::uint16_t token;
+            std::memcpy(&token, relay_data, 2);
+            // Obtain endpoint, set watchdog_alive_flag flag, then send.
+            auto& target = m_router_map[token];
+            auto& linked = m_router_map[target.linked];
+            if (not (target.valid and linked.valid))
+            {
+                l::error("NATNEG+ relay: invalid token={}, linked={}", token, target.linked);
+                continue;
+            }
+            target.watchdog_alive_flag = true;
+            linked.watchdog_alive_flag = true;
+            linked.endpoint = endpoint;
+            if (target.debug_counter < 8)
+            {
+                ++target.debug_counter;
+                l::debug
+                (
+                    "NATNEG+ relay: token {} (linked {}) received from {}, sending to {}",
+                    token,
+                    target.linked,
+                    endpoint,
+                    target.endpoint
+                );
+            }
+            co_await relay_socket.async_send_to
+            (
+                a::buffer(relay_data + 2, received_length - 2),
+                target.endpoint,
+                a::use_awaitable
             );
         }
-        co_await relay_socket.async_send_to
-        (
-            a::buffer(relay_data + 2, received_length - 2),
-            target.endpoint,
-            a::use_awaitable
-        );
+        catch (std::exception const& e)
+        {
+            l::error("NATNEG+ relay: catched exception: {}", e.what());
+        }
     }
 }
 
