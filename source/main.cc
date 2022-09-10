@@ -825,7 +825,7 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
             l::info("NATNEG+ watchdog clearing dead connection token={}, linked={}", token, route.linked);
             route = { .valid = false };
         }
-        timer.expires_after(60s);
+        timer.expires_after(300s);
         co_await timer.async_wait();
     };
     co_return;
