@@ -1,5 +1,4 @@
 #!/usr/bin/python
-from turtle import down
 import requests
 import json
 import os
