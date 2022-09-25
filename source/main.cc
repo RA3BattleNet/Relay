@@ -698,7 +698,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
             port_1 = htons(port_1);
             std::uint32_t ip_2 = player_2.address().to_v4().to_ulong();
             ip_2 = htonl(ip_2);
-            std::uint16_t port_2 = player_1.port();
+            std::uint16_t port_2 = player_2.port();
             port_2 = htons(port_2);
 
             l::info
