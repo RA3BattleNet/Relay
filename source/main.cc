@@ -133,7 +133,7 @@ private:
 private:
     bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
 public:
-    a::awaitable<void> start_control();
+    a::awaitable<void> start_control(std::uint16_t control_port);
     a::awaitable<void> start_relay();
     a::awaitable<void> watchdog();
 };
@@ -173,8 +173,14 @@ int main()
         auto natneg_plus_control_task = a::co_spawn
         (
             natneg_plus_context,
-            [&c = natneg_plus_connection] { return c.start_control(); },
+            [&c = natneg_plus_connection] { return c.start_control(10087); },
             a::use_future
+        );
+        a::co_spawn
+        (
+            natneg_plus_context,
+            [&c = natneg_plus_connection] { return c.start_control(10097); },
+            a::detached
         );
         auto natneg_plus_relay_task = a::co_spawn
         (
@@ -632,33 +638,43 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
     return true;
 }
 
-a::awaitable<void> NatnegPlusConnection::start_control()
+a::awaitable<void> NatnegPlusConnection::start_control(std::uint16_t control_port)
 {
     //std::scoped_lock lock{ NatnegPlusConnection::m_natneg_map };
-    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10087 } };
+    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), control_port } };
     while (true)
     {
         std::array<std::byte, 64> control_data = {};
         Udp::endpoint endpoint;
-        l::info("NATNEG+ control awaiting for next request...");
         auto received_length = co_await control_socket.async_receive_from
         (
             boost::asio::buffer(control_data),
             endpoint,
             a::use_awaitable
         );
-        if (received_length != 4)
+        if (received_length != (control_port == 10087 ? 4 : 5))
         {
-            l::error("NATNEG+ control received invalid length {} bytes", received_length);
+            l::error("NATNEG+ control @{} received invalid length {} bytes", control_port, received_length);
             continue;
         }
         // Parse input
-        std::uint32_t session_id;
+        std::uint32_t session_id = 0;
+        std::uint8_t sequence_number = 0;
         std::memcpy(&session_id, control_data.data(), sizeof(session_id));
-        l::info("NATNEG+ control processing request of {}...", session_id);
+        if (control_port != 10087)
+        {
+            std::memcpy(&sequence_number, control_data.data() + 4, sizeof(sequence_number));
+        }
+        l::info("NATNEG+ control @{} processing request of {}...", control_port, session_id);
         if (store_natneg_map(session_id, endpoint))
         {
-            l::info("NATNEG+ control see request of {} is ready, creating connection...", session_id);
+            l::info
+            (
+                "NATNEG+ control @{} see request of {}/{} is ready, creating connection...",
+                control_port,
+                session_id,
+                sequence_number
+            );
             // Create relay here.
             auto player_1 = m_natneg_map[session_id][0];
             auto player_2 = m_natneg_map[session_id][1];
@@ -703,7 +719,8 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
             l::info
             (
-                "NATNEG+ control create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
+                "NATNEG+ control @{} create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
+                control_port,
                 player_1,
                 token_1,
                 m_router_map[token_1].linked,
@@ -721,15 +738,20 @@ a::awaitable<void> NatnegPlusConnection::start_control()
             std::memcpy(response_2 + 7, &token_2, 2);
             std::memcpy(response_2 + 9, &ip_1, 4);
             std::memcpy(response_2 + 13, &port_1, 2);
+            if (control_port != 10087)
+            {
+                response_1[15] = sequence_number;
+                response_2[15] = sequence_number;
+            }
             auto send_to_player_1 = control_socket.async_send_to
             (
-                a::buffer(response_1, 15),
+                a::buffer(response_1, control_port == 10087 ? 15 : 16),
                 player_1,
                 a::use_awaitable
             );
             auto send_to_player_2 = control_socket.async_send_to
             (
-                a::buffer(response_2, 15),
+                a::buffer(response_2, control_port == 10087 ? 15 : 16),
                 player_2,
                 a::use_awaitable
             );
