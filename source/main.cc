@@ -631,7 +631,7 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
 a::awaitable<void> NatnegPlusConnection::start_control()
 {
     //std::scoped_lock lock{ NatnegPlusConnection::m_natneg_map };
-    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10097 } };
+    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10187 } };
     while (true)
     {
         std::array<std::byte, 64> control_data = {};
@@ -644,7 +644,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
         );
         if (received_length != 5)
         {
-            l::error("NATNEG+ control @10097 received invalid length {} bytes", received_length);
+            l::error("NATNEG+ control @10187 received invalid length {} bytes", received_length);
             continue;
         }
         // Parse input
@@ -652,12 +652,12 @@ a::awaitable<void> NatnegPlusConnection::start_control()
         std::uint8_t sequence_number = 0;
         std::memcpy(&session_id, control_data.data(), sizeof(session_id));
         std::memcpy(&sequence_number, control_data.data() + 4, sizeof(sequence_number));
-        l::info("NATNEG+ control @10097 processing request of {}...", session_id);
+        l::info("NATNEG+ control @10187 processing request of {}...", session_id);
         if (store_natneg_map(session_id, endpoint))
         {
             l::info
             (
-                "NATNEG+ control @10097 see request of {}/{} is ready, creating connection...",
+                "NATNEG+ control @10187 see request of {}/{} is ready, creating connection...",
                 session_id,
                 sequence_number
             );
@@ -705,7 +705,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
             l::info
             (
-                "NATNEG+ control @10097 create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
+                "NATNEG+ control @10187 create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
                 player_1,
                 token_1,
                 m_router_map[token_1].linked,
@@ -746,7 +746,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
 a::awaitable<void> NatnegPlusConnection::start_relay()
 {
-    Udp::endpoint bind_address = { a::ip::address_v4::any(), 10098 };
+    Udp::endpoint bind_address = { a::ip::address_v4::any(), 10188 };
     Udp::socket relay_socket = { co_await a::this_coro::executor, bind_address };
     l::info("NATNEG+ relay starting...");
     std::byte relay_data[2048] = {};
