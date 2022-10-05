@@ -619,6 +619,11 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
     if (endpoints.size() >= 2)
     {
         // Received more than two INIT, impossibe, clean it.
+        l::warn
+        (
+            "NATNEG+ session {:08X} detected more than two INIT: existing from {}, new from {}",
+            id, fmt::join(endpoints, ", "), endpoint
+        );
         endpoints.clear();
         endpoints.push_back(endpoint);
         return false;
@@ -652,12 +657,12 @@ a::awaitable<void> NatnegPlusConnection::start_control()
         std::uint8_t sequence_number = 0;
         std::memcpy(&session_id, control_data.data(), sizeof(session_id));
         std::memcpy(&sequence_number, control_data.data() + 4, sizeof(sequence_number));
-        l::info("NATNEG+ control @10187 processing request of {}...", session_id);
+        l::info("NATNEG+ control @10187 processing request of {:08X}...", session_id);
         if (store_natneg_map(session_id, endpoint))
         {
             l::info
             (
-                "NATNEG+ control @10187 see request of {}/{} is ready, creating connection...",
+                "NATNEG+ control @10187 see request of {:08X}/{} is ready, creating connection...",
                 session_id,
                 sequence_number
             );
@@ -809,7 +814,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
 a::awaitable<void> NatnegPlusConnection::watchdog()
 {
     // Clean dead connection.
-    boost::asio::use_awaitable_t<>::as_default_on_t<boost::asio::steady_timer> timer{ co_await boost::asio::this_coro::executor };
+    SteadyTimer timer{ co_await a::this_coro::executor };
     while (true)
     {
         for (Route& route : m_router_map)
