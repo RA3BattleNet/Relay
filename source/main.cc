@@ -115,6 +115,11 @@ public:
 class NatnegPlusConnection
 {
 public:
+    struct NatnegRequest
+    {
+        std::vector<Udp::endpoint> players;
+        bool alive = true;
+    };
     struct Route
     {
         inline static constexpr std::uint8_t debug_limit = 8;
@@ -128,13 +133,14 @@ public:
 private:
     inline static constexpr std::size_t router_map_size = std::numeric_limits<std::uint16_t>::max() + 1;
     std::array<Route, router_map_size> m_router_map; // 标记每个token应该转发到哪里，以及watchdog_alive_flag flag
-    std::map<std::uint32_t, std::vector<Udp::endpoint>> m_natneg_map;  // 每个natneg session的缓存
+    std::map<std::uint32_t, NatnegRequest> m_natneg_map;  // 每个natneg session的缓存
 
 private:
     bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
 public:
     a::awaitable<void> start_control();
     a::awaitable<void> start_relay();
+    a::awaitable<void> natneg_request_watchdog();
     a::awaitable<void> watchdog();
 };
 
@@ -180,6 +186,12 @@ int main()
             [&c = natneg_plus_connection] { return c.start_relay(); },
             a::use_future
         );
+        auto natneg_plus_request_watchdog = a::co_spawn
+        (
+            natneg_plus_context,
+            [&c = natneg_plus_connection] { return c.natneg_request_watchdog(); },
+            a::use_future
+        );
         auto natneg_plus_relay_watchdog = a::co_spawn
         (
             natneg_plus_context,
@@ -197,6 +209,7 @@ int main()
         l::critical("natneg_plus_context finished");
         natneg_plus_control_task.get();
         natneg_plus_relay_task.get();
+        natneg_plus_request_watchdog.get();
         natneg_plus_relay_watchdog.get();
 
         runner_1.get();
@@ -615,21 +628,21 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
         m_natneg_map.try_emplace(id, std::vector{ endpoint });;
         return false;
     }
-    auto& [key, endpoints] = *found;
-    if (endpoints.size() >= 2)
+    auto& [key, natneg_request] = *found;
+    if (natneg_request.players.size() >= 2)
     {
         // Received more than two INIT, impossibe, clean it.
         l::warn
         (
             "NATNEG+ session {:08X} detected more than two INIT: existing from {}, new from {}",
-            id, fmt::join(endpoints, ", "), endpoint
+            id, fmt::join(natneg_request.players, ", "), endpoint
         );
-        endpoints.clear();
-        endpoints.push_back(endpoint);
+        natneg_request.players.clear();
+        natneg_request.players.push_back(endpoint);
         return false;
     }
     // insert new endpoint into existing vector
-    endpoints.push_back(endpoint);
+    natneg_request.players.push_back(endpoint);
     return true;
 }
 
@@ -667,8 +680,8 @@ a::awaitable<void> NatnegPlusConnection::start_control()
                 sequence_number
             );
             // Create relay here.
-            auto player_1 = m_natneg_map[session_id][0];
-            auto player_2 = m_natneg_map[session_id][1];
+            auto player_1 = m_natneg_map[session_id].players.at(0);
+            auto player_2 = m_natneg_map[session_id].players.at(1);
             std::uint16_t token_1 = distribute(rng);
             while (m_router_map[token_1].valid)
             {
@@ -809,6 +822,29 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             l::error("NATNEG+ relay: catched exception: {}", e.what());
         }
     }
+}
+
+a::awaitable<void> NatnegPlusConnection::natneg_request_watchdog()
+{
+    // Clean dead requests.
+    SteadyTimer timer{ co_await a::this_coro::executor };
+    while (true)
+    {
+        std::erase_if(m_natneg_map, [](std::pair<std::uint32_t, NatnegRequest> const& element)
+        {
+            auto& [key, request] = element;
+            l::info("NATNEG+ watchdog clearing dead request {:08X}", key);
+            return not request.alive;
+        });
+        // marking current request as dead so they will be clean after 30 seconds
+        for (auto& [key, request] : m_natneg_map)
+        {
+            request.alive = false;
+        }
+
+        timer.expires_after(30s);
+        co_await timer.async_wait();
+    };
 }
 
 a::awaitable<void> NatnegPlusConnection::watchdog()
