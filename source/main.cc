@@ -634,8 +634,8 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
         // Received more than two INIT, impossibe, clean it.
         l::warn
         (
-            "NATNEG+ session {:08X} detected more than two INIT: existing from {}, new from {}",
-            id, fmt::join(natneg_request.players, ", "), endpoint
+            "NATNEG+ session {:08X} detected more than two INIT: existing from {} and {}, new from {}",
+            id, natneg_request.players[0], natneg_request.players[1], endpoint
         );
         natneg_request.players.clear();
         natneg_request.players.push_back(endpoint);
