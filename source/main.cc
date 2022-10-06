@@ -147,7 +147,7 @@ public:
 struct EndPointFormatter : fmt::formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(Udp::endpoint const& input, FormatContext& ctx) -> decltype(ctx.out());
+    auto format(Udp::endpoint const& input, FormatContext& ctx) const -> decltype(ctx.out());
 };
 
 //template<>
@@ -614,7 +614,7 @@ void RelayServerNat::translate(Udp::endpoint& local_endpoint)
 //}
 
 template <typename FormatContext>
-auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -> decltype(ctx.out())
+auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) const -> decltype(ctx.out())
 {
     return fmt::format_to(ctx.out(), "{}:{}", input.address().to_string(), input.port());
 }
@@ -635,7 +635,7 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
         l::warn
         (
             "NATNEG+ session {:08X} detected more than two INIT: existing from {} and {}, new from {}",
-            id, natneg_request.players[0], natneg_request.players[1], endpoint
+            id, fmt::join(natneg_request.players, ", "), endpoint
         );
         natneg_request.players.clear();
         natneg_request.players.push_back(endpoint);
