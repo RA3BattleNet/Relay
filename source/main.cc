@@ -674,7 +674,7 @@ bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endp
     if (natneg_request.players_and_local_ports.contains(endpoint))
     {
         // current endpoint already exists, skip it
-        return false;
+        return natneg_request.players_and_local_ports.size() == 2;
     }
     if (natneg_request.players_and_local_ports.size() >= 2)
     {
