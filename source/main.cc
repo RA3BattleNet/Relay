@@ -840,7 +840,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 
 a::awaitable<void> NatnegPlusConnection::start_relay()
 {
-    Udp::endpoint bind_address = { a::ip::address_v4::any(), 10188 };
+    Udp::endpoint bind_address = { a::ip::address_v4::any(), 10190 };
     Udp::socket relay_socket = { co_await a::this_coro::executor, bind_address };
     l::info("NATNEG+ relay starting...");
     std::byte relay_data[2048] = {};
