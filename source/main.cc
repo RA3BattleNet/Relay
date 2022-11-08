@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <mutex>
 #include <random>
+#include <ranges>
 #include <source_location>
 
 namespace a = boost::asio;
@@ -117,7 +118,8 @@ class NatnegPlusConnection
 public:
     struct NatnegRequest
     {
-        std::vector<Udp::endpoint> players;
+        std::map<Udp::endpoint, std::uint16_t> players_and_local_ports;
+        std::map<Udp::endpoint, std::string> cached_responses;
         bool alive = true;
     };
     struct Route
@@ -136,12 +138,48 @@ private:
     std::map<std::uint32_t, NatnegRequest> m_natneg_map;  // 每个natneg session的缓存
 
 private:
-    bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint);
+    bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint, std::uint16_t local_port);
 public:
     a::awaitable<void> start_control();
     a::awaitable<void> start_relay();
     a::awaitable<void> natneg_request_watchdog();
     a::awaitable<void> watchdog();
+};
+
+struct Request
+{
+    std::size_t sequence_number;
+    std::uint32_t session_id;
+    std::uint16_t local_port;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE
+    (
+        Request,
+        sequence_number,
+        session_id,
+        local_port
+    );
+};
+
+struct Response
+{
+    inline static std::string_view constexpr header =
+        "MaribelHearnUsamiRenko"sv;
+    std::size_t sequence_number;
+    std::string peer_ip;
+    std::uint16_t peer_port;
+    std::uint16_t peer_local_port;
+    std::uint16_t relay_token;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE
+    (
+        Response,
+        sequence_number,
+        peer_ip,
+        peer_port,
+        peer_local_port,
+        relay_token
+    );
 };
 
 struct EndPointFormatter : fmt::formatter<std::string>
@@ -619,40 +657,50 @@ auto EndPointFormatter::format(Udp::endpoint const& input, FormatContext& ctx) -
     return fmt::format_to(ctx.out(), "{}:{}", input.address().to_string(), input.port());
 }
 
-bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint)
+bool NatnegPlusConnection::store_natneg_map(std::uint32_t id, Udp::endpoint endpoint, std::uint16_t local_port)
 {
     auto found = m_natneg_map.find(id);
     if (found == m_natneg_map.end())
     {
         // insert new endpoint into new vector
-        m_natneg_map.try_emplace(id, std::vector{ endpoint });;
+        m_natneg_map.try_emplace
+        (
+            id,
+            std::map<Udp::endpoint, std::uint16_t>{ { endpoint, local_port } }
+        );
         return false;
     }
     auto& [key, natneg_request] = *found;
-    if (natneg_request.players.size() >= 2)
+    if (natneg_request.players_and_local_ports.contains(endpoint))
+    {
+        // current endpoint already exists, skip it
+        return false;
+    }
+    if (natneg_request.players_and_local_ports.size() >= 2)
     {
         // Received more than two INIT, impossibe, clean it.
+        auto get_key = &decltype(natneg_request.players_and_local_ports)::value_type::first;
         l::warn
         (
             "NATNEG+ session {:08X} detected more than two INIT: existing from {}, new from {}",
-            id, fmt::join(natneg_request.players, ", "), endpoint
+            id, fmt::join(natneg_request.players_and_local_ports | std::views::transform(get_key), ", "), endpoint
         );
-        natneg_request.players.clear();
-        natneg_request.players.push_back(endpoint);
+        natneg_request.players_and_local_ports.clear();
+        natneg_request.players_and_local_ports[endpoint] = local_port;
         return false;
     }
     // insert new endpoint into existing vector
-    natneg_request.players.push_back(endpoint);
-    return true;
+    natneg_request.players_and_local_ports[endpoint] = local_port;
+    return true; // implies that we have two endpoints now
 }
 
 a::awaitable<void> NatnegPlusConnection::start_control()
 {
     //std::scoped_lock lock{ NatnegPlusConnection::m_natneg_map };
-    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10187 } };
+    Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10189 } };
     while (true)
     {
-        std::array<std::byte, 64> control_data = {};
+        std::array<char, 128> control_data = {};
         Udp::endpoint endpoint;
         auto received_length = co_await control_socket.async_receive_from
         (
@@ -660,28 +708,45 @@ a::awaitable<void> NatnegPlusConnection::start_control()
             endpoint,
             a::use_awaitable
         );
-        if (received_length != 5)
+        std::string_view received{ control_data.data(), received_length };
+        j::json json = j::json::parse(received, nullptr, false);
+        if (not json.is_object() or json.is_discarded())
         {
-            l::error("NATNEG+ control @10187 received invalid length {} bytes", received_length);
+            l::error("NATNEG+ control @10189 received invalid length {} bytes", received_length);
+            continue;
+        }
+        Request request{};
+        try
+        {
+            json.get_to(request);
+        }
+        catch (std::exception const& e)
+        {
+            l::error("NATNEG+ control @10189 received invalid JSON: {}: {}", e.what(), received);
             continue;
         }
         // Parse input
-        std::uint32_t session_id = 0;
-        std::uint8_t sequence_number = 0;
-        std::memcpy(&session_id, control_data.data(), sizeof(session_id));
-        std::memcpy(&sequence_number, control_data.data() + 4, sizeof(sequence_number));
-        l::info("NATNEG+ control @10187 processing request of {:08X}...", session_id);
-        if (store_natneg_map(session_id, endpoint))
+        auto [sequence_number, session_id, local_port] = request;
+        l::info("NATNEG+ control @10189 processing request of {:08X}...", session_id);
+        if (not store_natneg_map(session_id, endpoint, local_port))
+        {
+            // not ready yet
+            l::info("NATNEG+ control @10189 session {:08X} not ready yet", session_id);
+            continue;
+        }
+        auto& [players_and_local_ports, cached_responses, alive] = m_natneg_map[session_id];
+        if (cached_responses.size() != 2)
         {
             l::info
             (
-                "NATNEG+ control @10187 see request of {:08X}/{} is ready, creating connection...",
+                "NATNEG+ control @10189 see request of {:08X}/{} is ready, creating connection...",
                 session_id,
                 sequence_number
             );
+
             // Create relay here.
-            auto player_1 = m_natneg_map[session_id].players.at(0);
-            auto player_2 = m_natneg_map[session_id].players.at(1);
+            auto& [player_1, local_port_1] = *players_and_local_ports.begin();
+            auto& [player_2, local_port_2] = *players_and_local_ports.rbegin();
             std::uint16_t token_1 = distribute(rng);
             while (m_router_map[token_1].valid)
             {
@@ -711,19 +776,10 @@ a::awaitable<void> NatnegPlusConnection::start_control()
                 m_router_map[token_1].debug_counter = 0;
                 m_router_map[token_2].debug_counter = 0;
             }
-            // Send message here.
-            std::uint32_t ip_1 = player_1.address().to_v4().to_ulong();
-            ip_1 = htonl(ip_1);
-            std::uint16_t port_1 = player_1.port();
-            port_1 = htons(port_1);
-            std::uint32_t ip_2 = player_2.address().to_v4().to_ulong();
-            ip_2 = htonl(ip_2);
-            std::uint16_t port_2 = player_2.port();
-            port_2 = htons(port_2);
 
             l::info
             (
-                "NATNEG+ control @10187 create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
+                "NATNEG+ control @10189 create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
                 player_1,
                 token_1,
                 m_router_map[token_1].linked,
@@ -731,34 +787,54 @@ a::awaitable<void> NatnegPlusConnection::start_control()
                 token_2,
                 m_router_map[token_2].linked
             );
-            char response_1[16];
-            std::memcpy(response_1, "CONNECT", 7);
-            std::memcpy(response_1 + 7, &token_1, 2);
-            std::memcpy(response_1 + 9, &ip_2, 4);
-            std::memcpy(response_1 + 13, &port_2, 2);
-            response_1[15] = sequence_number;
-            char response_2[16];
-            std::memcpy(response_2, "CONNECT", 7);
-            std::memcpy(response_2 + 7, &token_2, 2);
-            std::memcpy(response_2 + 9, &ip_1, 4);
-            std::memcpy(response_2 + 13, &port_1, 2);
-            response_2[15] = sequence_number;
-            auto send_to_player_1 = control_socket.async_send_to
-            (
-                a::buffer(response_1, 16),
-                player_1,
-                a::use_awaitable
-            );
-            auto send_to_player_2 = control_socket.async_send_to
-            (
-                a::buffer(response_2, 16),
-                player_2,
-                a::use_awaitable
-            );
-            co_await(std::move(send_to_player_1) and std::move(send_to_player_2));
-            // Remove map
-            m_natneg_map.erase(session_id);
+
+            Response response_1
+            {
+                .sequence_number = sequence_number,
+                .peer_ip = player_2.address().to_string(),
+                .peer_port = player_2.port(),
+                .peer_local_port = local_port_2,
+                .relay_token = token_1,
+            };
+            Response response_2
+            {
+                .sequence_number = sequence_number,
+                .peer_ip = player_1.address().to_string(),
+                .peer_port = player_1.port(),
+                .peer_local_port = local_port_1,
+                .relay_token = token_2,
+            };
+            cached_responses =
+            {
+                { player_1, std::string{ Response::header } + j::json(response_1).dump() },
+                { player_2, std::string{ Response::header } + j::json(response_2).dump() },
+            };
         }
+        else
+        {
+            l::info
+            (
+                "NATNEG+ control @10189 see request of {:08X}/{} was already ready, sending cached response...",
+                session_id,
+                sequence_number
+            );
+        }
+
+        auto& [player_1, response_1] = *cached_responses.begin();
+        auto& [player_2, response_2] = *cached_responses.rbegin();
+        auto send_to_player_1 = control_socket.async_send_to
+        (
+            boost::asio::buffer(response_1),
+            player_1,
+            a::use_awaitable
+        );
+        auto send_to_player_2 = control_socket.async_send_to
+        (
+            boost::asio::buffer(response_2),
+            player_2,
+            a::use_awaitable
+        );
+        co_await(std::move(send_to_player_1) and std::move(send_to_player_2));
     }
 }
 
@@ -839,6 +915,7 @@ a::awaitable<void> NatnegPlusConnection::natneg_request_watchdog()
         // marking current request as dead so they will be clean after 30 seconds
         for (auto& [key, request] : m_natneg_map)
         {
+            l::info("NATNEG+ watchdog marking request {:08X}", key);
             request.alive = false;
         }
 
