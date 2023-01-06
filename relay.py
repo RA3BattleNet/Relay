@@ -16,6 +16,7 @@ def get_latest_artifact(data):
             if artifact["name"] == "artifact":
                 artifact_url = artifact["archive_download_url"]
                 artifact_id = artifact["id"]
+                return artifact_url, artifact_id
     else:
         return None, None
 
