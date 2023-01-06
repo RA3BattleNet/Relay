@@ -65,11 +65,13 @@ private:
     inline static constexpr std::size_t router_map_size = std::numeric_limits<std::uint16_t>::max() + 1;
     std::array<Route, router_map_size> m_router_map; // 标记每个token应该转发到哪里，以及watchdog_alive_flag flag
     std::map<std::uint32_t, NatnegRequest> m_natneg_map;  // 每个natneg session的缓存
+    std::string m_control_log_id;
 
 private:
     bool store_natneg_map(std::uint32_t id, Udp::endpoint endpoint, std::uint16_t local_port);
 public:
     a::awaitable<void> start_control();
+    a::awaitable<void> process_control(Udp::socket& control_socket);
     a::awaitable<void> start_relay();
     a::awaitable<void> natneg_request_watchdog();
     a::awaitable<void> watchdog();
@@ -127,8 +129,12 @@ int main()
 {
     try
     {
-        l::cfg::load_env_levels();
-        l::set_default_logger(l::rotating_logger_mt("main", "logs/relay.txt", 1048576 * 5, 3));
+        // l::cfg::load_env_levels();
+        l::sink_ptr default_sink = std::make_shared<l::sinks::rotating_file_sink_mt>("logs/relay.txt", 1048576 * 5, 3);
+        l::sink_ptr error_sink = std::make_shared<l::sinks::rotating_file_sink_mt>("logs/relay_errors.txt", 1048576 * 5, 3);
+        default_sink->set_level(l::level::trace);
+        error_sink->set_level(l::level::err);
+        l::set_default_logger(std::make_shared<l::logger>("main", std::initializer_list{ default_sink, error_sink }));
         l::flush_every(60s);
         l::info("public ip is {}", RelayServerNat::instance().public_ip().to_string());
         a::io_context context;
@@ -204,24 +210,24 @@ RelayServerNat& RelayServerNat::instance()
     static auto pointer = ([]
     {
         static auto self = RelayServerNat{};
-        self.update_ip();
-        auto runner = []
+    self.update_ip();
+    auto runner = []
+    {
+        while (true)
         {
-            while (true)
+            std::this_thread::sleep_for(30min);
+            try
             {
-                std::this_thread::sleep_for(30min);
-                try
-                {
-                    self.update_ip();
-                }
-                catch (std::exception const& e)
-                {
-                    l::error("error when updating public ip: {}", e.what());
-                }
+                self.update_ip();
             }
-        };
-        std::thread{ runner }.detach();
-        return &self;
+            catch (std::exception const& e)
+            {
+                l::error("error when updating public ip: {}", e.what());
+            }
+        }
+    };
+    std::thread{ runner }.detach();
+    return &self;
     })();
     return *pointer;
 }
@@ -285,144 +291,167 @@ a::awaitable<void> NatnegPlusConnection::start_control()
 {
     //std::scoped_lock lock{ NatnegPlusConnection::m_natneg_map };
     Udp::socket control_socket = { co_await a::this_coro::executor, { a::ip::address_v4::any(), 10189 } };
+    m_control_log_id = fmt::format("NATNEG+ control @{}", control_socket.local_endpoint().port());
     while (true)
     {
-        std::array<char, 128> control_data = {};
-        Udp::endpoint endpoint;
-        auto received_length = co_await control_socket.async_receive_from
-        (
-            boost::asio::buffer(control_data),
-            endpoint,
-            a::use_awaitable
-        );
-        std::string_view received{ control_data.data(), received_length };
-        j::json json = j::json::parse(received, nullptr, false);
-        if (not json.is_object() or json.is_discarded())
-        {
-            l::error("NATNEG+ control @10189 received invalid length {} bytes", received_length);
-            continue;
-        }
-        Request request{};
         try
         {
-            json.get_to(request);
+            process_control(control_socket);
         }
         catch (std::exception const& e)
         {
-            l::error("NATNEG+ control @10189 received invalid JSON: {}: {}", e.what(), received);
-            continue;
+            l::error("{} encountered error because: {}", m_control_log_id, e.what());
         }
-        // Parse input
-        auto [sequence_number, session_id, local_port] = request;
-        l::info("NATNEG+ control @10189 processing request of {:08X}...", session_id);
-        if (not store_natneg_map(session_id, endpoint, local_port))
-        {
-            // not ready yet
-            l::info("NATNEG+ control @10189 session {:08X} not ready yet", session_id);
-            continue;
-        }
-        auto& [players_and_local_ports, cached_responses, alive] = m_natneg_map[session_id];
-        if (cached_responses.size() != 2)
-        {
-            l::info
-            (
-                "NATNEG+ control @10189 see request of {:08X}/{} is ready, creating connection...",
-                session_id,
-                sequence_number
-            );
-
-            // Create relay here.
-            auto& [player_1, local_port_1] = *players_and_local_ports.begin();
-            auto& [player_2, local_port_2] = *players_and_local_ports.rbegin();
-            std::uint16_t token_1 = distribute(rng);
-            while (m_router_map[token_1].valid)
-            {
-                ++token_1;
-            }
-            std::uint16_t token_2 = distribute(rng);
-            while (m_router_map[token_2].valid or token_2 == token_1)
-            {
-                ++token_2;
-            }
-            m_router_map[token_1] =
-            {
-                .endpoint = player_2,
-                .linked = token_2,
-                .watchdog_alive_flag = true,
-                .valid = true,
-            };
-            m_router_map[token_2] =
-            {
-                .endpoint = player_1,
-                .linked = token_1,
-                .watchdog_alive_flag = true,
-                .valid = true
-            };
-            if (spdlog::get_level() <= spdlog::level::debug)
-            {
-                m_router_map[token_1].debug_counter = 0;
-                m_router_map[token_2].debug_counter = 0;
-            }
-
-            l::info
-            (
-                "NATNEG+ control @10189 create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
-                player_1,
-                token_1,
-                m_router_map[token_1].linked,
-                player_2,
-                token_2,
-                m_router_map[token_2].linked
-            );
-
-            Response response_1
-            {
-                .sequence_number = sequence_number,
-                .peer_ip = player_2.address().to_string(),
-                .peer_port = player_2.port(),
-                .peer_local_port = local_port_2,
-                .relay_token = token_1,
-            };
-            Response response_2
-            {
-                .sequence_number = sequence_number,
-                .peer_ip = player_1.address().to_string(),
-                .peer_port = player_1.port(),
-                .peer_local_port = local_port_1,
-                .relay_token = token_2,
-            };
-            cached_responses =
-            {
-                { player_1, std::string{ Response::header } + j::json(response_1).dump() },
-                { player_2, std::string{ Response::header } + j::json(response_2).dump() },
-            };
-        }
-        else
-        {
-            l::info
-            (
-                "NATNEG+ control @10189 see request of {:08X}/{} was already ready, sending cached response...",
-                session_id,
-                sequence_number
-            );
-        }
-
-        auto& [player_1, response_1] = *cached_responses.begin();
-        auto& [player_2, response_2] = *cached_responses.rbegin();
-        auto send_to_player_1 = control_socket.async_send_to
-        (
-            boost::asio::buffer(response_1),
-            player_1,
-            a::use_awaitable
-        );
-        auto send_to_player_2 = control_socket.async_send_to
-        (
-            boost::asio::buffer(response_2),
-            player_2,
-            a::use_awaitable
-        );
-        co_await(std::move(send_to_player_1) and std::move(send_to_player_2));
     }
+}
+
+a::awaitable<void> NatnegPlusConnection::process_control(Udp::socket& control_socket)
+{
+    std::array<char, 128> control_data = {};
+    Udp::endpoint endpoint;
+    auto received_length = co_await control_socket.async_receive_from
+    (
+        boost::asio::buffer(control_data),
+        endpoint,
+        a::use_awaitable
+    );
+    std::string_view received{ control_data.data(), received_length };
+    j::json json = j::json::parse(received, nullptr, false);
+    if (not json.is_object() or json.is_discarded())
+    {
+        l::error("{} received invalid length {} bytes from {}", m_control_log_id, received_length, endpoint);
+        co_return;
+    }
+    Request request{};
+    try
+    {
+        json.get_to(request);
+    }
+    catch (std::exception const& e)
+    {
+        l::error("{} received invalid JSON from {}: {}: {}", m_control_log_id, endpoint, e.what(), received);
+        co_return;
+    }
+    // Parse input
+    auto [sequence_number, session_id, local_port] = request;
+    l::info("{} processing request of {:08X} from {}...", m_control_log_id, session_id, endpoint);
+    if (not store_natneg_map(session_id, endpoint, local_port))
+    {
+        // not ready yet
+        l::info("{} session {:08X} not ready yet", m_control_log_id, session_id);
+        co_return;
+    }
+    auto& [players_and_local_ports, cached_responses, alive] = m_natneg_map[session_id];
+    if (cached_responses.size() != 2)
+    {
+        l::info
+        (
+            "{} see request of {:08X}/{} is ready, creating connection...",
+            m_control_log_id,
+            session_id,
+            sequence_number
+        );
+
+        // Create relay here.
+        auto& [player_1, local_port_1] = *players_and_local_ports.begin();
+        auto& [player_2, local_port_2] = *players_and_local_ports.rbegin();
+        std::uint16_t token_1 = distribute(rng);
+        while (m_router_map[token_1].valid)
+        {
+            ++token_1;
+        }
+        std::uint16_t token_2 = distribute(rng);
+        while (m_router_map[token_2].valid or token_2 == token_1)
+        {
+            ++token_2;
+        }
+        m_router_map[token_1] =
+        {
+            .endpoint = player_2,
+            .linked = token_2,
+            .watchdog_alive_flag = true,
+            .valid = true,
+        };
+        m_router_map[token_2] =
+        {
+            .endpoint = player_1,
+            .linked = token_1,
+            .watchdog_alive_flag = true,
+            .valid = true
+        };
+        if (spdlog::get_level() <= spdlog::level::debug)
+        {
+            m_router_map[token_1].debug_counter = 0;
+            m_router_map[token_2].debug_counter = 0;
+        }
+
+        l::info
+        (
+            "{} create following info: player_1 [endpoint {}, token {}, linked {}], player_2 [endpoint {}, token {}, linked {}]",
+            m_control_log_id,
+            player_1,
+            token_1,
+            m_router_map[token_1].linked,
+            player_2,
+            token_2,
+            m_router_map[token_2].linked
+        );
+
+        Response response_1
+        {
+            .sequence_number = sequence_number,
+            .peer_ip = player_2.address().to_string(),
+            .peer_port = player_2.port(),
+            .peer_local_port = local_port_2,
+            .relay_token = token_1,
+        };
+        Response response_2
+        {
+            .sequence_number = sequence_number,
+            .peer_ip = player_1.address().to_string(),
+            .peer_port = player_1.port(),
+            .peer_local_port = local_port_1,
+            .relay_token = token_2,
+        };
+        cached_responses =
+        {
+            { player_1, std::string{ Response::header } + j::json(response_1).dump() },
+            { player_2, std::string{ Response::header } + j::json(response_2).dump() },
+        };
+    }
+    else
+    {
+        l::info
+        (
+            "{} see request of {:08X}/{} was already ready, sending cached response...",
+            m_control_log_id,
+            session_id,
+            sequence_number
+        );
+    }
+
+    auto& [player_1, response_1] = *cached_responses.begin();
+    auto& [player_2, response_2] = *cached_responses.rbegin();
+    auto send_to_player_1 = control_socket.async_send_to
+    (
+        boost::asio::buffer(response_1),
+        player_1,
+        a::use_awaitable
+    );
+    auto send_to_player_2 = control_socket.async_send_to
+    (
+        boost::asio::buffer(response_2),
+        player_2,
+        a::use_awaitable
+    );
+    co_await(std::move(send_to_player_1) and std::move(send_to_player_2));
+    l::info
+    (
+        "{} successfully sent response for {:08X}/{}",
+        m_control_log_id,
+        session_id,
+        sequence_number
+    );
 }
 
 a::awaitable<void> NatnegPlusConnection::start_relay()
@@ -496,8 +525,8 @@ a::awaitable<void> NatnegPlusConnection::natneg_request_watchdog()
         std::erase_if(m_natneg_map, [](std::pair<std::uint32_t, NatnegRequest> const& element)
         {
             auto& [key, request] = element;
-            l::info("NATNEG+ watchdog clearing dead request {:08X}", key);
-            return not request.alive;
+        l::info("NATNEG+ watchdog clearing dead request {:08X}", key);
+        return not request.alive;
         });
         // marking current request as dead so they will be clean after 30 seconds
         for (auto& [key, request] : m_natneg_map)
