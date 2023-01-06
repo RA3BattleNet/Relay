@@ -130,6 +130,7 @@ int main()
     try
     {
         // l::cfg::load_env_levels();
+        l::set_level(l::level::trace);
         l::sink_ptr default_sink = std::make_shared<l::sinks::rotating_file_sink_mt>("logs/relay.txt", 1048576 * 5, 3);
         l::sink_ptr error_sink = std::make_shared<l::sinks::rotating_file_sink_mt>("logs/relay_errors.txt", 1048576 * 5, 3);
         default_sink->set_level(l::level::trace);
