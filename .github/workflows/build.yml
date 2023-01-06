@@ -25,6 +25,7 @@ jobs:
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: g++-11
+          debug: false # It appears to be generating extra artifacts which contains debug logs
 
       - name: Get the latest version of CMake
         uses: lukka/get-cmake@latest
