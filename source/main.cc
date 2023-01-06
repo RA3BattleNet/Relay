@@ -57,7 +57,7 @@ public:
 
         Udp::endpoint endpoint;
         std::uint16_t linked = 0;
-        std::uint8_t debug_counter = debug_limit + 1;
+        std::uint8_t debug_counter = 0; // debug_limit + 1;
         bool watchdog_alive_flag = false;
         bool valid = false;
     };
