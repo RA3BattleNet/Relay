@@ -494,7 +494,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             if (target.debug_counter < 8)
             {
                 ++target.debug_counter;
-                l::debug
+                l::info
                 (
                     "NATNEG+ relay: token {} (linked {}) received from {}, sending to {}",
                     token,
