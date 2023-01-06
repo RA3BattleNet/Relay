@@ -296,7 +296,7 @@ a::awaitable<void> NatnegPlusConnection::start_control()
     {
         try
         {
-            process_control(control_socket);
+            co_await process_control(control_socket);
         }
         catch (std::exception const& e)
         {
