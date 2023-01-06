@@ -13,8 +13,8 @@ def get_artifact_info():
 def get_latest_artifact(data):
     if data["artifacts"]:
         for artifact in data["artifacts"]:
-			if artifact["name"] == "artifact":
-				artifact_url = artifact["archive_download_url"]
+            if artifact["name"] == "artifact":
+                artifact_url = artifact["archive_download_url"]
                 artifact_id = artifact["id"]
     else:
         return None, None
