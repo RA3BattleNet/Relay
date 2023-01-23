@@ -120,10 +120,9 @@ int main()
         error_sink->set_level(l::level::err);
         l::set_default_logger(std::make_shared<l::logger>("main", std::initializer_list{ default_sink, error_sink }));
         l::flush_every(60s);
-        a::io_context context;
         l::info("starting relay server...");
 
-        a::io_context natneg_plus_context;
+        a::io_context natneg_plus_context{ BOOST_ASIO_CONCURRENCY_HINT_UNSAFE };
         NatnegPlusConnection natneg_plus_connection;
         auto natneg_plus_control_task = a::co_spawn
         (
