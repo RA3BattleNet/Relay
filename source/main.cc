@@ -25,23 +25,6 @@ using Udp = a::ip::udp;
 using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
 using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
-// 把服务器的内网地址转换为外网地址
-class RelayServerNat
-{
-private:
-    mutable std::mutex m_mutex;
-    a::ip::address_v4 m_public_ip;
-
-private:
-    RelayServerNat() = default;
-    void update_ip();
-
-public:
-    static RelayServerNat& instance();
-    a::ip::address_v4 public_ip() const;
-    void translate(Udp::endpoint& local_endpoint);
-};
-
 class NatnegPlusConnection
 {
 public:
@@ -137,7 +120,6 @@ int main()
         error_sink->set_level(l::level::err);
         l::set_default_logger(std::make_shared<l::logger>("main", std::initializer_list{ default_sink, error_sink }));
         l::flush_every(60s);
-        l::info("public ip is {}", RelayServerNat::instance().public_ip().to_string());
         a::io_context context;
         l::info("starting relay server...");
 
@@ -187,62 +169,6 @@ int main()
         return 1;
     }
     return 0;
-}
-
-void RelayServerNat::update_ip()
-{
-    h::Client client{ "http://api.ipify.org" };
-    if (h::Result result = client.Get("/"); result)
-    {
-        l::info("obtaining public ip, response = {}", result.value().body);
-        auto new_ip = a::ip::address_v4::from_string(result.value().body);
-        l::info("parsed public ip: {}", new_ip.to_string());
-        std::scoped_lock lock{ m_mutex };
-        m_public_ip = new_ip;
-    }
-    else
-    {
-        l::error("failed to obtain public ip: {}", h::to_string(result.error()));
-    }
-}
-
-RelayServerNat& RelayServerNat::instance()
-{
-    static auto pointer = ([]
-    {
-        static auto self = RelayServerNat{};
-    self.update_ip();
-    auto runner = []
-    {
-        while (true)
-        {
-            std::this_thread::sleep_for(30min);
-            try
-            {
-                self.update_ip();
-            }
-            catch (std::exception const& e)
-            {
-                l::error("error when updating public ip: {}", e.what());
-            }
-        }
-    };
-    std::thread{ runner }.detach();
-    return &self;
-    })();
-    return *pointer;
-}
-
-a::ip::address_v4 RelayServerNat::public_ip() const
-{
-    std::scoped_lock lock{ m_mutex };
-    return m_public_ip;
-}
-
-void RelayServerNat::translate(Udp::endpoint& local_endpoint)
-{
-    std::scoped_lock lock{ m_mutex };
-    local_endpoint.address(m_public_ip);
 }
 
 template <typename FormatContext>
