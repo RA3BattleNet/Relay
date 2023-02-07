@@ -25,6 +25,12 @@ using Udp = a::ip::udp;
 using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
 using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
+void send_exception_warning(std::string error_message);
+
+static std::string exception_warning_hostname = "";
+static std::string exception_warning_path = "";
+static std::string exception_warning_token = "";
+
 class NatnegPlusConnection
 {
 public:
@@ -108,7 +114,7 @@ struct fmt::formatter<Udp::endpoint> : EndPointFormatter {};
 std::minstd_rand rng{ std::random_device{}() };
 std::uniform_int_distribution<std::uint16_t> distribute;
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
@@ -121,6 +127,14 @@ int main()
         l::set_default_logger(std::make_shared<l::logger>("main", std::initializer_list{ default_sink, error_sink }));
         l::flush_every(60s);
         l::info("starting relay server...");
+
+        if (argc == 4)
+        {
+            l::info("enter exception warning mode");
+            exception_warning_hostname = argv[1];
+            exception_warning_path = argv[2];
+            exception_warning_token = argv[3];
+        }
 
         a::io_context natneg_plus_context{ BOOST_ASIO_CONCURRENCY_HINT_UNSAFE };
         NatnegPlusConnection natneg_plus_connection;
@@ -510,4 +524,49 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
         co_await timer.async_wait();
     };
     co_return;
+}
+
+static std::uint32_t exception_warning_counter = 0;
+
+void send_exception_warning(std::string error_message)
+{
+    exception_warning_counter++;
+    if (exception_warning_counter > 5)
+    {
+        l::info("Exception counter = {} ignore warning request", exception_warning_counter);
+        return;
+    }
+
+    auto server_name = "Relay"s;
+    a::ip::address_v4 my_ip;
+    h::Client ip_client{ "http://api.ipify.org" };
+    if (h::Result result = ip_client.Get("/"); result)
+    {
+        l::info("obtaining public ip, response = {}", result.value().body);
+        my_ip = a::ip::address_v4::from_string(result.value().body);
+        l::info("parsed public ip: {}", my_ip.to_string());
+        server_name += my_ip.to_string();
+    }
+    else
+    {
+        l::error("failed to obtain public ip: {}", h::to_string(result.error()));
+        server_name += "<NOIP>";
+    }
+
+    h::Client web_client{ exception_warning_hostname };
+    h::Params params
+    {
+        { "token", exception_warning_token },
+        { "server", server_name },
+        { "message", error_message }
+    };
+
+    if (h::Result result = web_client.Post(exception_warning_path, params); result)
+    {
+        l::info("send exception warning success");
+    }
+    else
+    {
+        l::error("send exception warning fail");
+    }
 }
