@@ -388,19 +388,28 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
     std::byte relay_data[2048] = {};
     while (true)
     {
+        Udp::endpoint endpoint;
         try
         {
-            Udp::endpoint endpoint;
-            auto received_length = co_await relay_socket.async_receive_from
-            (
-                boost::asio::buffer(relay_data),
-                endpoint,
-                a::use_awaitable
-            );
-            if (received_length < 2)
+            auto received_length = 0llu;
+            try
             {
-                l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
-                continue;
+                received_length = co_await relay_socket.async_receive_from
+                (
+                    boost::asio::buffer(relay_data),
+                    endpoint,
+                    a::use_awaitable
+                );
+                if (received_length < 2)
+                {
+                    l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
+                    continue;
+                }
+            }
+            catch (std::exception const& e)
+            {
+                l::error("NATNEG+ relay (relay_socket.async_receive_from): catched exception: {}, source endpoint {}", e.what(), endpoint);
+                throw e;
             }
             // Parse to get token
             std::uint16_t token;
@@ -428,16 +437,24 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
                     target.endpoint
                 );
             }
-            co_await relay_socket.async_send_to
-            (
-                a::buffer(relay_data + 2, received_length - 2),
-                target.endpoint,
-                a::use_awaitable
-            );
+            try
+            {
+                co_await relay_socket.async_send_to
+                (
+                    a::buffer(relay_data + 2, received_length - 2),
+                    target.endpoint,
+                    a::use_awaitable
+                );
+            }
+            catch (std::exception const& e)
+            {
+                l::error("NATNEG+ relay (relay_socket.async_send_to): catched exception: {}, source endpoint {}, target endpoint {}", e.what(), endpoint, target.endpoint);
+                throw e;
+            }
         }
         catch (std::exception const& e)
         {
-            l::error("NATNEG+ relay: catched exception: {}", e.what());
+            l::error("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint);
         }
     }
 }
