@@ -425,7 +425,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
                     e.what(),
                     endpoint
                 );
-                throw e;
+                throw;
             }
             // Parse to get token
             std::uint16_t token;
@@ -471,7 +471,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
                     endpoint,
                     target.endpoint
                 );
-                throw e;
+                throw;
             }
         }
         catch (std::exception const& e)
