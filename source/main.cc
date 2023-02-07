@@ -25,6 +25,8 @@ using Udp = a::ip::udp;
 using SteadyTimer = a::use_awaitable_t<>::as_default_on_t<a::steady_timer>;
 using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
+void send_exception_warning(std::string error_message);
+
 class NatnegPlusConnection
 {
 public:
@@ -107,8 +109,10 @@ struct fmt::formatter<Udp::endpoint> : EndPointFormatter {};
 
 std::minstd_rand rng{ std::random_device{}() };
 std::uniform_int_distribution<std::uint16_t> distribute;
+nlohmann::json config;
+std::uint32_t exception_warning_counter = 0;
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
@@ -121,6 +125,12 @@ int main()
         l::set_default_logger(std::make_shared<l::logger>("main", std::initializer_list{ default_sink, error_sink }));
         l::flush_every(60s);
         l::info("starting relay server...");
+
+        if (std::ifstream config_file{ "config.json" };
+            config_file.good())
+        {
+            config_file >> config;
+        }
 
         a::io_context natneg_plus_context{ BOOST_ASIO_CONCURRENCY_HINT_UNSAFE };
         NatnegPlusConnection natneg_plus_connection;
@@ -165,6 +175,7 @@ int main()
     catch (std::exception const& e)
     {
         l::critical("Application is terminating because: {}", e.what());
+        send_exception_warning(fmt::format("Critical: {}", e.what()));
         return 1;
     }
     return 0;
@@ -388,19 +399,33 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
     std::byte relay_data[2048] = {};
     while (true)
     {
+        Udp::endpoint endpoint;
         try
         {
-            Udp::endpoint endpoint;
-            auto received_length = co_await relay_socket.async_receive_from
-            (
-                boost::asio::buffer(relay_data),
-                endpoint,
-                a::use_awaitable
-            );
-            if (received_length < 2)
+            std::size_t received_length = 0;
+            try
             {
-                l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
-                continue;
+                received_length = co_await relay_socket.async_receive_from
+                (
+                    boost::asio::buffer(relay_data),
+                    endpoint,
+                    a::use_awaitable
+                );
+                if (received_length < 2)
+                {
+                    l::error("NATNEG+ relay received a tiny packet (< 2 bytes), ignore");
+                    continue;
+                }
+            }
+            catch (std::exception const& e)
+            {
+                l::error
+                (
+                    "NATNEG+ relay (relay_socket.async_receive_from): catched exception: {}, source endpoint {}",
+                    e.what(),
+                    endpoint
+                );
+                throw;
             }
             // Parse to get token
             std::uint16_t token;
@@ -428,16 +453,31 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
                     target.endpoint
                 );
             }
-            co_await relay_socket.async_send_to
-            (
-                a::buffer(relay_data + 2, received_length - 2),
-                target.endpoint,
-                a::use_awaitable
-            );
+            try
+            {
+                co_await relay_socket.async_send_to
+                (
+                    a::buffer(relay_data + 2, received_length - 2),
+                    target.endpoint,
+                    a::use_awaitable
+                );
+            }
+            catch (std::exception const& e)
+            {
+                l::error
+                (
+                    "NATNEG+ relay (relay_socket.async_send_to): catched exception: {}, source endpoint {}, target endpoint {}",
+                    e.what(),
+                    endpoint,
+                    target.endpoint
+                );
+                throw;
+            }
         }
         catch (std::exception const& e)
         {
-            l::error("NATNEG+ relay: catched exception: {}", e.what());
+            l::error("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint);
+            send_exception_warning(fmt::format("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint));
         }
     }
 }
@@ -493,4 +533,53 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
         co_await timer.async_wait();
     };
     co_return;
+}
+
+void send_exception_warning(std::string error_message)
+{
+    ++exception_warning_counter;
+    if (exception_warning_counter > 5)
+    {
+        l::info("Exception counter = {} ignore warning request", exception_warning_counter);
+        return;
+    }
+    if (not config.contains("exceptionWarning"))
+    {
+        l::info("exception warning not configured, ignore");
+        return;
+    }
+    auto& exceptionWarning = config.at("exceptionWarning");
+
+    auto server_name = "Relay"s;
+    a::ip::address_v4 my_ip;
+    h::Client ip_client{ "http://api.ipify.org" };
+    if (h::Result result = ip_client.Get("/"); result)
+    {
+        l::info("obtaining public ip, response = {}", result.value().body);
+        my_ip = a::ip::address_v4::from_string(result.value().body);
+        l::info("parsed public ip: {}", my_ip.to_string());
+        server_name += my_ip.to_string();
+    }
+    else
+    {
+        l::error("failed to obtain public ip: {}", h::to_string(result.error()));
+        server_name += "<NOIP>";
+    }
+
+    h::Client web_client{ exceptionWarning.at("hostname").get<std::string>() };
+    h::Params params
+    {
+        { "token", exceptionWarning.at("token").get<std::string>() },
+        { "server", server_name },
+        { "message", error_message }
+    };
+
+    if (h::Result result = web_client.Post(exceptionWarning.at("path").get<std::string>(), params); result)
+    {
+        l::info("send exception warning success");
+    }
+    else
+    {
+        l::error("send exception warning fail");
+    }
 }
