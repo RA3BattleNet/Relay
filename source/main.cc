@@ -477,7 +477,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
         catch (std::exception const& e)
         {
             l::error("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint);
-            send_exception_warning(fmt::format("NATNEG+ relay: {}", e.what()));
+            send_exception_warning(fmt::format("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint));
         }
     }
 }
