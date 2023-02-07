@@ -27,10 +27,6 @@ using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
 void send_exception_warning(std::string error_message);
 
-static std::string exception_warning_hostname = "";
-static std::string exception_warning_path = "";
-static std::string exception_warning_token = "";
-
 class NatnegPlusConnection
 {
 public:
@@ -113,6 +109,8 @@ struct fmt::formatter<Udp::endpoint> : EndPointFormatter {};
 
 std::minstd_rand rng{ std::random_device{}() };
 std::uniform_int_distribution<std::uint16_t> distribute;
+nlohmann::json config;
+std::uint32_t exception_warning_counter = 0;
 
 int main(int argc, char** argv)
 {
@@ -128,12 +126,10 @@ int main(int argc, char** argv)
         l::flush_every(60s);
         l::info("starting relay server...");
 
-        if (argc == 4)
+        if (std::ifstream config_file{ "config.json" };
+            config_file.good())
         {
-            l::info("enter exception warning mode");
-            exception_warning_hostname = argv[1];
-            exception_warning_path = argv[2];
-            exception_warning_token = argv[3];
+            config_file >> config;
         }
 
         a::io_context natneg_plus_context{ BOOST_ASIO_CONCURRENCY_HINT_UNSAFE };
@@ -179,6 +175,7 @@ int main(int argc, char** argv)
     catch (std::exception const& e)
     {
         l::critical("Application is terminating because: {}", e.what());
+        send_exception_warning(fmt::format("Critical: {}", e.what()));
         return 1;
     }
     return 0;
@@ -405,7 +402,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
         Udp::endpoint endpoint;
         try
         {
-            auto received_length = 0llu;
+            std::size_t received_length = 0;
             try
             {
                 received_length = co_await relay_socket.async_receive_from
@@ -422,7 +419,12 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             }
             catch (std::exception const& e)
             {
-                l::error("NATNEG+ relay (relay_socket.async_receive_from): catched exception: {}, source endpoint {}", e.what(), endpoint);
+                l::error
+                (
+                    "NATNEG+ relay (relay_socket.async_receive_from): catched exception: {}, source endpoint {}",
+                    e.what(),
+                    endpoint
+                );
                 throw e;
             }
             // Parse to get token
@@ -462,13 +464,20 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             }
             catch (std::exception const& e)
             {
-                l::error("NATNEG+ relay (relay_socket.async_send_to): catched exception: {}, source endpoint {}, target endpoint {}", e.what(), endpoint, target.endpoint);
+                l::error
+                (
+                    "NATNEG+ relay (relay_socket.async_send_to): catched exception: {}, source endpoint {}, target endpoint {}",
+                    e.what(),
+                    endpoint,
+                    target.endpoint
+                );
                 throw e;
             }
         }
         catch (std::exception const& e)
         {
             l::error("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint);
+            send_exception_warning(fmt::format("NATNEG+ relay: {}", e.what()));
         }
     }
 }
@@ -526,16 +535,20 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
     co_return;
 }
 
-static std::uint32_t exception_warning_counter = 0;
-
 void send_exception_warning(std::string error_message)
 {
-    exception_warning_counter++;
+    ++exception_warning_counter;
     if (exception_warning_counter > 5)
     {
         l::info("Exception counter = {} ignore warning request", exception_warning_counter);
         return;
     }
+    if (not config.contains("exceptionWarning"))
+    {
+        l::info("exception warning not configured, ignore");
+        return;
+    }
+    auto& exceptionWarning = config.at("exceptionWarning");
 
     auto server_name = "Relay"s;
     a::ip::address_v4 my_ip;
@@ -553,15 +566,15 @@ void send_exception_warning(std::string error_message)
         server_name += "<NOIP>";
     }
 
-    h::Client web_client{ exception_warning_hostname };
+    h::Client web_client{ exceptionWarning.at("hostname").get<std::string>() };
     h::Params params
     {
-        { "token", exception_warning_token },
+        { "token", exceptionWarning.at("token").get<std::string>() },
         { "server", server_name },
         { "message", error_message }
     };
 
-    if (h::Result result = web_client.Post(exception_warning_path, params); result)
+    if (h::Result result = web_client.Post(exceptionWarning.at("path").get<std::string>(), params); result)
     {
         l::info("send exception warning success");
     }
