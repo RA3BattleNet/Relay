@@ -27,9 +27,10 @@ using UdpSocket = a::use_awaitable_t<>::as_default_on_t<Udp::socket>;
 
 void send_exception_warning(std::string error_message);
 
-static std::string exception_warning_hostname = "";
-static std::string exception_warning_path = "";
-static std::string exception_warning_token = "";
+std::string exception_warning_hostname;
+std::string exception_warning_path;
+std::string exception_warning_token;
+std::uint32_t exception_warning_counter = 0;
 
 class NatnegPlusConnection
 {
@@ -469,6 +470,7 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
         catch (std::exception const& e)
         {
             l::error("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint);
+            send_exception_warning(std::format("NATNEG+ relay: catched exception: {}, source endpoint {}", e.what(), endpoint));
         }
     }
 }
@@ -525,8 +527,6 @@ a::awaitable<void> NatnegPlusConnection::watchdog()
     };
     co_return;
 }
-
-static std::uint32_t exception_warning_counter = 0;
 
 void send_exception_warning(std::string error_message)
 {
