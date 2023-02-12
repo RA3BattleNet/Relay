@@ -455,12 +455,33 @@ a::awaitable<void> NatnegPlusConnection::start_relay()
             }
             try
             {
-                co_await relay_socket.async_send_to
-                (
-                    a::buffer(relay_data + 2, received_length - 2),
-                    target.endpoint,
-                    a::use_awaitable
-                );
+                if (target.endpoint.port() == 0)
+                {
+                    l::error
+                    (
+                        "NATNEG+ relay (relay_socket.async_send_to): target port is 0! Reject sending..., source endpoint {}, target endpoint {}",
+                        endpoint,
+                        target.endpoint
+                    );
+                }
+                else if (target.endpoint.address().is_multicast())
+                {
+                    l::error
+                    (
+                        "NATNEG+ relay (relay_socket.async_send_to): target ip is multicast! Reject sending..., source endpoint {}, target endpoint {}",
+                        endpoint,
+                        target.endpoint
+                    );
+                }
+                else
+                {
+                    co_await relay_socket.async_send_to
+                    (
+                        a::buffer(relay_data + 2, received_length - 2),
+                        target.endpoint,
+                        a::use_awaitable
+                    );
+                }
             }
             catch (std::exception const& e)
             {
