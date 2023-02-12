@@ -566,15 +566,18 @@ void send_exception_warning(std::string error_message)
         server_name += "<NOIP>";
     }
 
-    h::Client web_client{ exceptionWarning.at("hostname").get<std::string>() };
-    h::Params params
+    auto hostname = exceptionWarning.at("hostname").get<std::string>();
+    auto token = exceptionWarning.at("token").get<std::string>();
+    auto path = exceptionWarning.at("path").get<std::string>();
+    h::Client web_client{ hostname };
+    j::json body
     {
-        { "token", exceptionWarning.at("token").get<std::string>() },
+        { "token", token },
         { "server", server_name },
         { "message", error_message }
     };
 
-    if (h::Result result = web_client.Post(exceptionWarning.at("path").get<std::string>(), params); result)
+    if (h::Result result = web_client.Post(path, body.dump(), "application/json"); result)
     {
         l::info("send exception warning success");
     }
