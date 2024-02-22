@@ -46,7 +46,6 @@ if __name__ == "__main__":
     print("INFO: Please make sure you've set up the required environment!")
     if len(args) <= 1:
         print("ERROR: Please specify a Github Access Token to download artifacts! Aborting...")
-        pass
     else:
         print("INFO: Set token to: %s" % str(args[1]))
         download(str(args[1]), "./relay.zip", "./")
