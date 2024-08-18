@@ -32,7 +32,7 @@ def extract(src, dst):
         zip.extractall(dst)
 
 
-def download(token, file, folder):
+def download_then_extract(token, file, folder):
     data = json.loads(get_artifact_info())
     id, url = get_latest_artifact(data)
     if id and url:
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         print("ERROR: Please specify a Github Access Token to download artifacts! Aborting...")
     else:
         print("INFO: Set token to: %s" % str(args[1]))
-        download(str(args[1]), "./relay.zip", "./")
+        download_then_extract(str(args[1]), "./relay.zip", "./")
         os.chmod("./Relay", 0o744)
         os.remove("./relay.zip")
         print("Download completed!")
